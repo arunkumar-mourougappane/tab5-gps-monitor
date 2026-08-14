@@ -520,10 +520,18 @@
     </p>
     <div class="notes">
       <div>
+        <h3>Accuracy carries its own trend</h3>
+        <p>The HDOP readout is followed by the last 40 valid readings on a fixed 0&ndash;5 scale, in the
+          space the PDOP/VDOP caption used to hold. A single number can't say whether a fix is settling
+          or degrading, which is the question this block exists to answer; the full DOP trio is still in
+          the sentence stream and the SD log. The scale is fixed deliberately &mdash; a trace that
+          autoscaled would make a steady poor fix look like a steady good one.</p>
+      </div>
+      <div>
         <h3>Position card &rarr; trip stats</h3>
         <p>Tapping the card swaps live coordinates for accumulated distance, max and average speed, trip
-          time, time-to-first-fix, and a 40-sample HDOP sparkline on a fixed 0&ndash;5 scale. The sky
-          plot and stream keep updating behind it.</p>
+          time and time-to-first-fix, with the same HDOP trend at full card width. The sky plot and
+          stream keep updating behind it.</p>
       </div>
       <div>
         <h3>Satellite dots</h3>
@@ -908,6 +916,7 @@
     }
 
     s.hdopHistory.push(s.hdop);
+    s.hdopHead++;
     if (s.hdopHistory.length > 40) s.hdopHistory.shift();
 
     if (s.t % 90000 < dtMs && s.battery > 5) s.battery--;
@@ -988,6 +997,21 @@
       el("abs badgerow", "", badges);
   }
 
+  // HDOP trend: fixed 0-5 scale, same as the firmware. Drawn in the accuracy
+  // block on the live view and full width on the trip view.
+  function sparkSvg(sx, sy, sw, sh) {
+    const hist = SIM.hdopHistory;
+    let inner = `<rect x="${sx}" y="${sy}" width="${sw}" height="${sh}" fill="${C.bg}"></rect>`;
+    if (hist.length > 1) {
+      const pts = hist.map((v, i) =>
+        `${(sx + (i / (hist.length - 1)) * sw).toFixed(1)},${(sy + sh - Math.min(v / 5, 1) * sh).toFixed(1)}`
+      ).join(" ");
+      inner += `<polyline points="${pts}" fill="none" stroke="${C.acc}" stroke-width="1.5"></polyline>`;
+    }
+    return `<svg class="abs" style="${at(sx, sy, `width:${sw}px;height:${sh}px`)}"
+              viewBox="${sx} ${sy} ${sw} ${sh}" aria-hidden="true">${inner}</svg>`;
+  }
+
   function drawFixPanel() {
     if (UI.logExpanded) { document.getElementById("l-fix").innerHTML = ""; return; }
     const r = inner(RECT.fix);
@@ -1017,17 +1041,7 @@
         SIM.ttff ? `TIME TO FIRST FIX: ${(SIM.ttff / 1000).toFixed(1)}s` : "TIME TO FIRST FIX: --");
       h += el("abs lbl", at(r.x, 336), "HDOP TREND");
 
-      const hist = SIM.hdopHistory;
-      const sw = r.w, sh = 28, sx = r.x, sy = 358;
-      let spark = `<rect x="${sx}" y="${sy}" width="${sw}" height="${sh}" fill="${C.bg}"></rect>`;
-      if (hist.length > 1) {
-        const pts = hist.map((v, i) =>
-          `${(sx + (i / (hist.length - 1)) * sw).toFixed(1)},${(sy + sh - Math.min(v / 5, 1) * sh).toFixed(1)}`
-        ).join(" ");
-        spark += `<polyline points="${pts}" fill="none" stroke="${C.acc}" stroke-width="1.5"></polyline>`;
-      }
-      h += `<svg class="abs" style="${at(sx, sy, `width:${sw}px;height:${sh}px`)}"
-              viewBox="${sx} ${sy} ${sw} ${sh}" aria-hidden="true">${spark}</svg>`;
+      h += sparkSvg(r.x, 358, r.w, 28);
       document.getElementById("l-fix").innerHTML = h;
       return;
     }
@@ -1055,7 +1069,8 @@
     h += el("abs val", at(r.x, 426), hdopStr);
     h += el("abs qbadge", at(r.x + 14 + hdopStr.length * 13, 428,
       `background:${SIM.locValid ? qColor : C.none}`), SIM.locValid ? qLabel : "NO FIX");
-    h += el("abs lbl", at(r.x, 462), `PDOP ${SIM.pdop.toFixed(1)}&nbsp; VDOP ${SIM.vdop.toFixed(1)}`);
+    // HDOP trend, in the space the PDOP/VDOP caption used to hold.
+    h += sparkSvg(r.x, 456, half - 10, 18);
 
     const d = SIM.utc;
     h += el("abs lbl", at(r.x + half, 406), "TIME (UTC)");
@@ -1208,11 +1223,11 @@
 
   const sigFix = () => UI.view === "trip"
     ? ["trip", SIM.tripKm.toFixed(2), SIM.maxSpeed.toFixed(1), Math.floor((SIM.t - SIM.firstFixAt) / 1000),
-       SIM.ttff, SIM.hdopHistory.length, SIM.hdop.toFixed(1)].join("|")
+       SIM.ttff, SIM.hdopHead, SIM.hdop.toFixed(1)].join("|")
     : ["live", SIM.fixType, SIM.satsUsed, visibleSats().length,
        SIM.locValid ? SIM.lat.toFixed(6) : "-", SIM.locValid ? SIM.lon.toFixed(6) : "-",
        Math.round(SIM.alt), SIM.spd.toFixed(1), Math.round(SIM.crs),
-       SIM.hdop.toFixed(1), SIM.utc.getUTCSeconds()].join("|");
+       SIM.hdop.toFixed(1), SIM.hdopHead, SIM.utc.getUTCSeconds()].join("|");
 
   const sigSky = () =>
     visibleSats().map((s) => `${s.t}${s.prn}:${Math.round(s.el)}:${Math.round(s.az)}:${s.snr}`).join(",") +

@@ -1199,6 +1199,9 @@ static void drawStatusPill(uint32_t snapLastSentenceMs) {
                sdReady ? COLOR_STATUS_GOOD : COLOR_STATUS_NONE);
 }
 
+static void drawSparkline(int x, int y, int w, int h, const float *values, int count, uint32_t head,
+                          uint16_t color, float maxVal); // defined below, with the trip view
+
 // Medium-weight value+quality-badge / value+caption block, used for the
 // accuracy and time readouts -- a step down from the lat/lon hero values but
 // well above a plain caption line.
@@ -1235,13 +1238,20 @@ static int drawAccuracyBlock(int x, int y, int w, const RenderSnapshot &s) {
   d.setCursor(bx + 10, by + (bh - d.fontHeight()) / 2);
   d.print(qLabel);
 
+  // The HDOP trend sits directly under its own value, in the space the
+  // PDOP/VDOP caption used to hold. A single number says nothing about whether
+  // the fix is settling or degrading, which is the question the accuracy block
+  // exists to answer; PDOP/VDOP are still in the stream and on the SD log for
+  // anyone who wants the full trio.
+  //
+  // 18px tall so the block's baseline still lines up with the date line the
+  // time block ends on, and the same fixed 0-5 scale the trip view uses -- a
+  // trace that autoscaled would make a steady poor fix look identical to a
+  // steady good one.
   y += heroH + 4;
-  d.setTextColor(COLOR_TEXT_SECONDARY, COLOR_CARD_BG);
-  char buf[32];
-  snprintf(buf, sizeof(buf), "PDOP %.1f  VDOP %.1f", s.pdop, s.vdop);
-  d.setCursor(x, y);
-  d.print(buf);
-  y += d.fontHeight() + 2;
+  constexpr int TREND_H = 18;
+  drawSparkline(x, y, w, TREND_H, s.hdopHistory, s.hdopHistCount, s.hdopHistHead, COLOR_ACCENT, 5.0f);
+  y += TREND_H + 2;
   return y;
 }
 
@@ -1653,7 +1663,10 @@ static uint32_t sigFixPanel(const RenderSnapshot &s) {
     h = hashVal(h, s.spdValid); h = hashVal(h, s.spd);
     h = hashVal(h, s.crsValid); h = hashVal(h, s.crs);
     h = hashVal(h, s.hdopValid); h = hashVal(h, s.hdop);
-    h = hashVal(h, s.pdop); h = hashVal(h, s.vdop);
+    // The live view draws the HDOP trend now, not the DOP trio -- so the graph
+    // has to be able to trigger its own repaint, and a PDOP that jitters
+    // without anything visible changing must not.
+    h = hashVal(h, s.hdopHistHead);
     h = hashVal(h, s.dateValid); h = hashVal(h, s.timeValid);
     h = hashVal(h, s.year); h = hashVal(h, s.month); h = hashVal(h, s.day);
     h = hashVal(h, s.hour); h = hashVal(h, s.minute); h = hashVal(h, s.second);
