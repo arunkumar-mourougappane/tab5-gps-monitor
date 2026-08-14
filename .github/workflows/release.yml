@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          # Pin click below 8.2: platformio has no upper bound tight enough to avoid
+          # pulling a click release whose API breaks the pioarduino-bundled esptool
+          # used for the ESP32-P4 (Tab5) target.
+          pip install "click<8.2" platformio
+
+      - name: Build firmware
+        # -j 1: parallel builds of this target intermittently fail with
+        # "cannot find lib*/M5GFX/.../*.cpp.o" linker errors — a library
+        # variant-dir race in this platform version's SCons LDF. Reproduced
+        # locally (~1 in 5 clean parallel builds); serial builds are reliable.
+        run: pio run -j 1
+
+      - name: Stage release assets
+        run: |
+          cp .pio/build/tab5/firmware.bin "tab5-gps-monitor-${{ github.ref_name }}.bin"
+          cp .pio/build/tab5/firmware.factory.bin "tab5-gps-monitor-${{ github.ref_name }}.factory.bin"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          files: |
+            tab5-gps-monitor-${{ github.ref_name }}.bin
+            tab5-gps-monitor-${{ github.ref_name }}.factory.bin
