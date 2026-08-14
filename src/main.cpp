@@ -852,7 +852,7 @@ static int hitTestSkyDot(int px, int py) {
 
 // Draws label above value, auto-shrinking the value if it would overflow `w`.
 // Returns the y position just below the drawn value.
-static int drawHeroValue(int x, int y, int w, const char *label, const String &value, uint8_t bigSize = 2) {
+static int drawHeroValue(int x, int y, int w, const char *label, const char *value, uint8_t bigSize = 2) {
   auto &d = canvas;
   d.setFont(&fonts::Font2);
   d.setTextSize(1);
@@ -871,7 +871,7 @@ static int drawHeroValue(int x, int y, int w, const char *label, const String &v
   return y;
 }
 
-static void drawMiniStat(int x, int y, const char *label, const String &value) {
+static void drawMiniStat(int x, int y, const char *label, const char *value) {
   auto &d = canvas;
   d.setFont(&fonts::Font2);
   d.setTextSize(1);
@@ -885,7 +885,7 @@ static void drawMiniStat(int x, int y, const char *label, const String &value) {
 }
 
 // Rounded pill with a leading text (no dot) -- used for fix/sat count badges.
-static int drawBadge(int x, int y, const String &text, uint16_t bg, uint16_t fg) {
+static int drawBadge(int x, int y, const char *text, uint16_t bg, uint16_t fg) {
   auto &d = canvas;
   d.setFont(&fonts::Font2);
   d.setTextSize(1);
@@ -1094,7 +1094,7 @@ static PressTarget hitTestChips(int x, int y) {
 
 // Right-aligned "dot + label" pill, returning its left edge so callers can
 // chain the next badge leftward from it.
-static int drawDotBadge(int rightEdgeX, int py, const String &text, uint16_t dotColor) {
+static int drawDotBadge(int rightEdgeX, int py, const char *text, uint16_t dotColor) {
   auto &d = canvas;
   d.setFont(&fonts::Font2);
   d.setTextSize(1);
@@ -1112,13 +1112,31 @@ static int drawDotBadge(int rightEdgeX, int py, const String &text, uint16_t dot
   return px;
 }
 
+// M5.Power reads go over I2C to the PMIC. Both the status-bar signature and
+// the badge itself want them, and the signature is sampled every 200ms -- so
+// an uncached pair costs ten I2C round-trips a second for a value that moves
+// on the order of minutes. Refreshed at 1Hz and shared by both callers.
+static int32_t battLevel = -1; // 0-100, negative if unknown
+static bool battCharging = false;
+static uint32_t battReadMs = 0;
+
+static void refreshBattery() {
+  uint32_t now = millis();
+  if (battReadMs != 0 && now - battReadMs < 1000) return;
+  battReadMs = now;
+  battLevel = M5.Power.getBatteryLevel();
+  battCharging = M5.Power.isCharging() == m5::Power_Class::is_charging_t::is_charging;
+}
+
 static int drawBatteryBadge(int rightEdgeX, int py) {
   auto &d = canvas;
-  int32_t level = M5.Power.getBatteryLevel(); // 0-100, negative if unknown
-  bool charging = M5.Power.isCharging() == m5::Power_Class::is_charging_t::is_charging;
+  refreshBattery();
+  int32_t level = battLevel;
+  bool charging = battCharging;
 
-  String text = level >= 0 ? String(level) + "%" : String("--");
-  if (charging) text += " CHG";
+  char text[16];
+  if (level >= 0) snprintf(text, sizeof(text), "%d%%%s", (int)level, charging ? " CHG" : "");
+  else snprintf(text, sizeof(text), "--%s", charging ? " CHG" : "");
 
   d.setFont(&fonts::Font2);
   d.setTextSize(1);
@@ -1172,7 +1190,9 @@ static void drawStatusPill(uint32_t snapLastSentenceMs) {
                         haveData ? COLOR_STATUS_GOOD : COLOR_STATUS_BAD);
   int bpx = drawBatteryBadge(px - BADGE_GAP, py);
 #if ENABLE_WIFI_NMEA
-  bpx = drawDotBadge(bpx - BADGE_GAP, py, "AP " + String(nmeaClientCount),
+  char apBuf[12];
+  snprintf(apBuf, sizeof(apBuf), "AP %d", nmeaClientCount);
+  bpx = drawDotBadge(bpx - BADGE_GAP, py, apBuf,
                      nmeaClientCount > 0 ? COLOR_STATUS_GOOD : COLOR_TEXT_SECONDARY);
 #endif
   drawDotBadge(bpx - BADGE_GAP, py, sdReady ? "SD" : "NO SD",
@@ -1191,7 +1211,9 @@ static int drawAccuracyBlock(int x, int y, int w, const RenderSnapshot &s) {
   d.print("ACCURACY (HDOP)");
   y += d.fontHeight() + 4;
 
-  String val = s.hdopValid ? String(s.hdop, 1) : String("--");
+  char val[12];
+  if (s.hdopValid) snprintf(val, sizeof(val), "%.1f", s.hdop);
+  else snprintf(val, sizeof(val), "--");
   uint16_t qColor = COLOR_STATUS_NONE;
   const char *qLabel = s.hdopValid ? hdopQuality(s.hdop, qColor) : "NO FIX";
 
@@ -1282,16 +1304,21 @@ static int drawTripView(int x, int y, int w, const RenderSnapshot &s) {
   uint32_t elapsedMs = s.firstFixAbsMs ? (millis() - s.firstFixAbsMs) : 0;
   double avgSpeed = elapsedMs > 2000 ? s.tripDistanceKm / (elapsedMs / 3600000.0) : 0;
 
-  int y1 = drawHeroValue(x, y, colW - 10, "DISTANCE", String(s.tripDistanceKm, 2) + " km", 1);
-  int y2 = drawHeroValue(x + colW, y, colW - 10, "MAX SPEED", String(s.maxSpeedKmph, 1) + " km/h", 1);
+  char distBuf[20], maxBuf[20], avgBuf[20];
+  snprintf(distBuf, sizeof(distBuf), "%.2f km", s.tripDistanceKm);
+  snprintf(maxBuf, sizeof(maxBuf), "%.1f km/h", s.maxSpeedKmph);
+  snprintf(avgBuf, sizeof(avgBuf), "%.1f km/h", avgSpeed);
+
+  int y1 = drawHeroValue(x, y, colW - 10, "DISTANCE", distBuf, 1);
+  int y2 = drawHeroValue(x + colW, y, colW - 10, "MAX SPEED", maxBuf, 1);
   y = max(y1, y2) + 10;
 
   char tripBuf[12];
   uint32_t secs = elapsedMs / 1000;
   snprintf(tripBuf, sizeof(tripBuf), "%02u:%02u:%02u", (unsigned)(secs / 3600), (unsigned)((secs / 60) % 60),
            (unsigned)(secs % 60));
-  int y3 = drawHeroValue(x, y, colW - 10, "TRIP TIME", String(tripBuf), 1);
-  int y4 = drawHeroValue(x + colW, y, colW - 10, "AVG SPEED", String(avgSpeed, 1) + " km/h", 1);
+  int y3 = drawHeroValue(x, y, colW - 10, "TRIP TIME", tripBuf, 1);
+  int y4 = drawHeroValue(x + colW, y, colW - 10, "AVG SPEED", avgBuf, 1);
   y = max(y3, y4) + 8;
 
   d.setFont(&fonts::Font2);
@@ -1335,15 +1362,30 @@ static void drawFixPanel(const RenderSnapshot &s) {
     return;
   }
 
-  y = drawHeroValue(r.x, y, r.w, "LATITUDE", s.locValid ? String(s.lat, 6) : String("---"));
+  char latBuf[16], lonBuf[16], altBuf[16], spdBuf[16], crsBuf[16];
+  if (s.locValid) {
+    snprintf(latBuf, sizeof(latBuf), "%.6f", s.lat);
+    snprintf(lonBuf, sizeof(lonBuf), "%.6f", s.lon);
+  } else {
+    strlcpy(latBuf, "---", sizeof(latBuf));
+    strlcpy(lonBuf, "---", sizeof(lonBuf));
+  }
+  if (s.altValid) snprintf(altBuf, sizeof(altBuf), "%.0fm", s.alt);
+  else strlcpy(altBuf, "---", sizeof(altBuf));
+  if (s.spdValid) snprintf(spdBuf, sizeof(spdBuf), "%.1fkm/h", s.spd);
+  else strlcpy(spdBuf, "---", sizeof(spdBuf));
+  if (s.crsValid) snprintf(crsBuf, sizeof(crsBuf), "%.0f%c", s.crs, (char)0xB0);
+  else strlcpy(crsBuf, "---", sizeof(crsBuf));
+
+  y = drawHeroValue(r.x, y, r.w, "LATITUDE", latBuf);
   y += 12;
-  y = drawHeroValue(r.x, y, r.w, "LONGITUDE", s.locValid ? String(s.lon, 6) : String("---"));
+  y = drawHeroValue(r.x, y, r.w, "LONGITUDE", lonBuf);
   y += 20;
 
   int colW = r.w / 3;
-  drawMiniStat(r.x, y, "ALT", s.altValid ? String(s.alt, 0) + "m" : "---");
-  drawMiniStat(r.x + colW, y, "SPEED", s.spdValid ? String(s.spd, 1) + "km/h" : "---");
-  drawMiniStat(r.x + colW * 2, y, "CRS", s.crsValid ? String(s.crs, 0) + (char)0xB0 : "---");
+  drawMiniStat(r.x, y, "ALT", altBuf);
+  drawMiniStat(r.x + colW, y, "SPEED", spdBuf);
+  drawMiniStat(r.x + colW * 2, y, "CRS", crsBuf);
   y += 58;
 
   int colW2 = r.w / 2;
@@ -1437,9 +1479,11 @@ static void drawSatTooltip(const Rect &r) {
 
   auto &d = canvas;
   const SatInfo &s = satTooltip.info;
+  char snrBuf[8];
+  if (s.snr >= 0) snprintf(snrBuf, sizeof(snrBuf), "%d", s.snr);
+  else strlcpy(snrBuf, "-", sizeof(snrBuf));
   char buf[48];
-  snprintf(buf, sizeof(buf), "%s%d  EL %d  AZ %d  SNR %s", s.talker, s.prn, s.elevation, s.azimuth,
-           s.snr >= 0 ? String(s.snr).c_str() : "-");
+  snprintf(buf, sizeof(buf), "%s%d  EL %d  AZ %d  SNR %s", s.talker, s.prn, s.elevation, s.azimuth, snrBuf);
 
   d.setFont(&fonts::Font2);
   d.setTextSize(1);
@@ -1572,11 +1616,10 @@ static constexpr uint32_t FNV_SEED = 2166136261u;
 static uint32_t sigStatusBar(const RenderSnapshot &s) {
   uint32_t h = FNV_SEED;
   bool haveData = s.lastSentenceMs != 0 && millis() - s.lastSentenceMs < 5000;
-  int32_t level = M5.Power.getBatteryLevel();
-  bool charging = M5.Power.isCharging() == m5::Power_Class::is_charging_t::is_charging;
+  refreshBattery(); // rate-limited: the badge below reads the same cached pair
   h = hashVal(h, haveData);
-  h = hashVal(h, level);
-  h = hashVal(h, charging);
+  h = hashVal(h, battLevel);
+  h = hashVal(h, battCharging);
   h = hashVal(h, sdReady);
 #if ENABLE_WIFI_NMEA
   int clients = nmeaClientCount;
