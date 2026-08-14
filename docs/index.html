@@ -1,0 +1,1470 @@
+<title>Tab5 GPS Monitor UI</title>
+
+<style>
+  /* ---------------------------------------------------------------- tokens */
+  /* Page chrome is theme-aware. The device screen is NOT: it reproduces a
+     fixed 16-bit panel, so its palette is pinned on .screen and never inherits
+     from the viewer's theme. */
+  :root {
+    --ground: #eef0f4;
+    --surface: #ffffff;
+    --surface-2: #f6f7fa;
+    --ink: #141720;
+    --ink-2: #454c5e;
+    --muted: #6a7286;
+    --rule: #d9dde6;
+    --rule-strong: #c3c9d6;
+    --accent: #1f6fb2;
+    --accent-2: #14805a;
+    --bezel: #05070c;
+
+    --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    --page: min(1180px, 100% - 3rem);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0b0d13;
+      --surface: #12151d;
+      --surface-2: #171b25;
+      --ink: #e9ecf2;
+      --ink-2: #b3bacb;
+      --muted: #838b9f;
+      --rule: #232838;
+      --rule-strong: #333a4d;
+      --accent: #58a8e8;
+      --accent-2: #60d296;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0b0d13;
+    --surface: #12151d;
+    --surface-2: #171b25;
+    --ink: #e9ecf2;
+    --ink-2: #b3bacb;
+    --muted: #838b9f;
+    --rule: #232838;
+    --rule-strong: #333a4d;
+    --accent: #58a8e8;
+    --accent-2: #60d296;
+  }
+
+  /* ------------------------------------------------------------ page shell */
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { width: var(--page); margin-inline: auto; }
+
+  header.masthead {
+    padding: clamp(2.5rem, 7vw, 5rem) 0 2.25rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 1.25rem;
+  }
+  .eyebrow b { color: var(--accent); font-weight: 500; }
+
+  h1 {
+    font-size: clamp(2.4rem, 6vw, 4rem);
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+    font-weight: 800;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .lede {
+    max-width: 62ch;
+    font-size: 1.075rem;
+    color: var(--ink-2);
+    margin: 1.5rem 0 0;
+  }
+
+  section { padding: clamp(2.5rem, 6vw, 4rem) 0 0; }
+
+  h2 {
+    font-size: clamp(1.5rem, 3vw, 2rem);
+    letter-spacing: -0.02em;
+    font-weight: 700;
+    margin: 0 0 0.6rem;
+  }
+  h3 { font-size: 1.05rem; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 0.4rem; }
+
+  .section-note { color: var(--ink-2); max-width: 64ch; margin: 0 0 2rem; }
+
+  .rule-head {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    border-top: 2px solid var(--ink);
+    padding-top: 0.9rem;
+    margin-bottom: 1.25rem;
+  }
+  .rule-head .tag {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  /* ------------------------------------------------------------ simulator */
+  .sim {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 268px;
+    gap: 1.5rem;
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    .sim { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  .bezel {
+    background: var(--bezel);
+    padding: clamp(8px, 1.2vw, 16px);
+    border-radius: 14px;
+    border: 1px solid var(--rule-strong);
+    box-shadow: 0 1px 0 rgb(255 255 255 / 0.08) inset,
+                0 18px 40px -28px rgb(0 0 0 / 0.75);
+    overflow-x: auto;
+  }
+  .stage {
+    position: relative;
+    width: 100%;
+    min-width: 480px;
+    aspect-ratio: 1280 / 720;
+    overflow: hidden;
+    border-radius: 4px;
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  .statusline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    align-items: baseline;
+    margin-top: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .statusline b { color: var(--ink); font-weight: 500; }
+
+  .rail {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    padding: 1.1rem;
+  }
+  .rail h3 {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    margin: 0 0 0.6rem;
+  }
+  .btns { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  button {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.45rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--rule-strong);
+    background: var(--surface-2);
+    color: var(--ink-2);
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--surface);
+  }
+
+  .telemetry { display: flex; flex-direction: column; gap: 0.3rem; }
+  .trow {
+    display: grid;
+    grid-template-columns: 10px 1fr auto;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--ink-2);
+  }
+  .tled {
+    width: 10px; height: 10px; border-radius: 2px;
+    background: var(--rule-strong);
+    transition: background 420ms ease-out;
+  }
+  .tled.on { background: var(--accent); transition: none; }
+  .tcount { color: var(--muted); font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) {
+    .tled, .tled.on { transition: none; }
+  }
+
+  .railnote { font-size: 0.8rem; color: var(--muted); margin: 0; }
+
+  /* ============================== DEVICE SCREEN ============================
+     Fixed palette — the rgb565 constants from src/main.cpp, verbatim. */
+  .screen {
+    --bg: rgb(9, 11, 17);
+    --topbar: rgb(16, 18, 27);
+    --card: rgb(21, 24, 35);
+    --divider: rgb(45, 50, 66);
+    --t1: rgb(236, 239, 245);
+    --t2: rgb(138, 146, 166);
+    --acc: rgb(88, 168, 232);
+    --accgreen: rgb(96, 210, 150);
+    --good: rgb(84, 214, 140);
+    --warn: rgb(232, 188, 74);
+    --bad: rgb(232, 92, 92);
+    --none: rgb(90, 96, 112);
+
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1280px;
+    height: 720px;
+    transform-origin: top left;
+    background: var(--bg);
+    color: var(--t1);
+    font-family: var(--font-ui);
+    line-height: 1;
+    user-select: none;
+  }
+  .screen * { box-sizing: border-box; }
+  .screen .abs { position: absolute; }
+  .layer { position: absolute; inset: 0; }
+
+  /* Font2 ≈ 16px cell / Font4 ≈ 26px cell / Font4 ×2 ≈ 52px cell */
+  .f2 { font-size: 14px; }
+  .f0 { font-size: 10px; }
+  .t2 { color: var(--t2); }
+
+  .topbar {
+    left: 0; top: 0; width: 1280px; height: 56px;
+    background: var(--topbar);
+    border-bottom: 1px solid var(--divider);
+  }
+  .title {
+    left: 16px; top: 15px;
+    font-size: 22px; font-weight: 600; letter-spacing: 0.04em;
+  }
+  .chip {
+    height: 32px;
+    border-radius: 16px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+    background: var(--card);
+    color: var(--t2);
+  }
+  .chip.light { left: 300px; top: 12px; width: 104px; }
+  .chip.sleep { left: 414px; top: 12px; width: 104px; }
+  .chip.pressed { background: var(--acc); color: var(--bg); }
+
+  .badgerow {
+    right: 16px; top: 12px; height: 32px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .badge {
+    height: 32px; border-radius: 16px;
+    background: var(--card);
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 14px;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .batt {
+    width: 22px; height: 14px; border: 1px solid var(--t2); border-radius: 3px;
+    position: relative; flex: none; padding: 1px;
+  }
+  .batt::after {
+    content: ""; position: absolute; left: 100%; top: 3px;
+    width: 3px; height: 6px; background: var(--t2);
+  }
+  .batt i { display: block; height: 100%; border-radius: 1px; }
+
+  .card { background: var(--card); border-radius: 14px; }
+  .card > .hdr { position: absolute; left: 18px; top: 11px; font-size: 14px; color: var(--t2); }
+  .card > .hrule { position: absolute; left: 18px; top: 36px; height: 1px; }
+
+  .filterchip {
+    position: absolute; height: 26px; width: 92px; border-radius: 13px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; background: var(--topbar); color: var(--t2);
+  }
+  .filterchip.on { background: var(--accgreen); color: var(--bg); }
+  .filterchip.pressed { background: var(--acc); color: var(--bg); }
+
+  .pill {
+    height: 30px; border-radius: 15px;
+    display: inline-flex; align-items: center;
+    padding: 0 14px; font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .qbadge {
+    height: 24px; border-radius: 12px;
+    display: inline-flex; align-items: center;
+    padding: 0 10px; font-size: 14px; color: var(--bg);
+  }
+
+  .lbl { font-size: 14px; color: var(--t2); }
+  .hero { font-size: 44px; font-weight: 500; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .val { font-size: 22px; font-variant-numeric: tabular-nums; }
+
+  .ring { position: absolute; border: 1px solid var(--divider); border-radius: 50%; }
+  .radar-face { position: absolute; border-radius: 50%; background: var(--bg); }
+  .cross { position: absolute; background: var(--divider); }
+  .satdot { position: absolute; border-radius: 50%; }
+  .sigbar { position: absolute; height: 12px; border-radius: 6px; }
+
+  .log { font-family: var(--font-mono); color: var(--accgreen); white-space: pre; }
+  .counters { font-family: var(--font-mono); font-size: 14px; white-space: pre; }
+
+  .overlay-panel {
+    position: absolute; left: 360px; top: 255px; width: 560px; height: 210px;
+    background: var(--card); border: 1px solid var(--acc); border-radius: 14px;
+  }
+  .track { position: absolute; left: 390px; top: 337px; width: 500px; height: 26px; border-radius: 13px; background: var(--bg); }
+  .track i { position: absolute; left: 0; top: 0; height: 26px; border-radius: 13px; background: var(--acc); }
+  .knob { position: absolute; width: 34px; height: 34px; border-radius: 50%; background: var(--t1); top: 333px; }
+  .ovchip {
+    position: absolute; top: 403px; width: 150px; height: 44px; border-radius: 22px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--topbar); color: var(--t1); font-size: 14px;
+  }
+  .ovchip.pressed { background: var(--acc); color: var(--bg); }
+  .tooltip {
+    position: absolute; height: 30px; border-radius: 15px;
+    display: flex; align-items: center; padding: 0 12px;
+    font-size: 14px; color: var(--bg);
+  }
+  .dark { position: absolute; inset: 0; background: #000; }
+
+  /* ------------------------------------------------------------ reference */
+  .notes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 1.25rem 2rem;
+  }
+  .notes p { margin: 0.25rem 0 0; font-size: 0.9rem; color: var(--ink-2); }
+  .notes h3 {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .swatches {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+  }
+  .sw { background: var(--surface); padding: 0.85rem 1rem 1rem; }
+  .sw .chipcolor {
+    height: 44px; border-radius: 6px; border: 1px solid var(--rule-strong);
+    margin-bottom: 0.7rem;
+  }
+  .sw code { font-family: var(--font-mono); font-size: 0.78rem; display: block; color: var(--muted); }
+  .sw code.name { color: var(--ink); font-size: 0.8rem; letter-spacing: 0.02em; margin-bottom: 0.2rem; }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.6rem 1rem; border-bottom: 1px solid var(--rule); }
+  th {
+    font-family: var(--font-mono);
+    font-size: 0.66rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--muted); font-weight: 500;
+    background: var(--surface-2);
+  }
+  td.mono, td code { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  tbody tr:last-child td { border-bottom: 0; }
+
+  footer {
+    margin-top: clamp(3rem, 7vw, 5rem);
+    padding: 2rem 0 4rem;
+    border-top: 1px solid var(--rule);
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  footer code { font-family: var(--font-mono); color: var(--ink-2); }
+
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">M5Stack Tab5 &middot; ESP32-P4 &middot; <b>1280 &times; 720 MIPI-DSI</b></p>
+    <h1>GPS Monitor<br />instrument panel</h1>
+    <p class="lede">
+      The on-device UI from <code>src/main.cpp</code>, running. A simulated receiver feeds it fixes and
+      NMEA sentences; the panel below draws them with the firmware's own layout arithmetic, palette,
+      sort order and hit radii. Tap it the way you'd tap the hardware.
+    </p>
+  </header>
+
+  <!-- ================================================================ -->
+  <section>
+    <div class="rule-head">
+      <h2>Live panel</h2>
+      <span class="tag">Simulated receiver &middot; real layout</span>
+    </div>
+
+    <div class="sim">
+      <div>
+        <div class="bezel">
+          <div class="stage" id="stage" role="application" aria-label="Simulated Tab5 GPS monitor panel">
+            <div class="screen" id="screen">
+              <div class="layer" id="l-chrome"></div>
+              <div class="layer" id="l-fix"></div>
+              <div class="layer" id="l-sky"></div>
+              <div class="layer" id="l-log"></div>
+              <div class="layer" id="l-top"></div>
+              <div class="layer" id="l-overlay"></div>
+              <div class="layer" id="l-dark" hidden><div class="dark"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="statusline">
+          <span>UPTIME <b id="s-uptime">00:00</b></span>
+          <span>FIX <b id="s-fix">NO FIX</b></span>
+          <span>SATS <b id="s-sats">0/0</b></span>
+          <span>STATE <b id="s-state">live position</b></span>
+        </div>
+      </div>
+
+      <aside class="rail">
+        <div>
+          <h3>Scenario</h3>
+          <div class="btns" id="scenarios">
+            <button type="button" data-sc="cold">Cold start</button>
+            <button type="button" data-sc="drive" aria-pressed="true">Driving</button>
+            <button type="button" data-sc="canyon">Urban canyon</button>
+          </div>
+        </div>
+
+        <div>
+          <h3>Jump to state</h3>
+          <div class="btns" id="states">
+            <button type="button" data-st="live">Live</button>
+            <button type="button" data-st="trip">Trip</button>
+            <button type="button" data-st="log">NMEA</button>
+            <button type="button" data-st="dim">Brightness</button>
+          </div>
+        </div>
+
+        <div>
+          <h3>Repaints</h3>
+          <div class="telemetry">
+            <div class="trow"><span class="tled" id="led-status"></span><span>Status bar</span><span class="tcount" id="n-status">0</span></div>
+            <div class="trow"><span class="tled" id="led-fix"></span><span>Fix card</span><span class="tcount" id="n-fix">0</span></div>
+            <div class="trow"><span class="tled" id="led-sky"></span><span>Sky card</span><span class="tcount" id="n-sky">0</span></div>
+            <div class="trow"><span class="tled" id="led-log"></span><span>NMEA card</span><span class="tcount" id="n-log">0</span></div>
+          </div>
+          <p class="railnote" style="margin-top:0.7rem">
+            Each panel carries a signature of exactly the values it draws, sampled every 200&nbsp;ms.
+            A lamp lights only when that panel's signature moved and it was actually repainted.
+          </p>
+        </div>
+
+        <div>
+          <h3>Simulation</h3>
+          <div class="btns">
+            <button type="button" id="playpause" aria-pressed="true">Pause</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <div class="rule-head">
+      <h2>What you're tapping</h2>
+      <span class="tag">Three toggles, one layout</span>
+    </div>
+    <p class="section-note">
+      The panel has a single layout with three switches on it — position view, log expansion, and the
+      brightness overlay. Everything below is reachable from anywhere in one tap.
+    </p>
+    <div class="notes">
+      <div>
+        <h3>Position card &rarr; trip stats</h3>
+        <p>Tapping the card swaps live coordinates for accumulated distance, max and average speed, trip
+          time, time-to-first-fix, and a 40-sample HDOP sparkline on a fixed 0&ndash;5 scale. The sky
+          plot and stream keep updating behind it.</p>
+      </div>
+      <div>
+        <h3>Satellite dots</h3>
+        <p>34&nbsp;px pick radius against dots drawn at 4&ndash;9&nbsp;px, because a fingertip covers
+          about 40&nbsp;px on this panel. It picks the <em>nearest</em> dot, not the first qualifying
+          one — satellites cluster at the zenith and the tooltip names one specific vehicle. It expires
+          after four seconds.</p>
+      </div>
+      <div>
+        <h3>NMEA card &rarr; full height</h3>
+        <p>Expanding steps the log up to 22&nbsp;px and drops the counter column: a long GSV sentence
+          runs to roughly 980&nbsp;px at that size, wider than the 968&nbsp;px the counters leave behind.</p>
+      </div>
+      <div>
+        <h3>Filter chip</h3>
+        <p>Cycles ALL &rarr; NO GSV &rarr; POS and clears the ring buffer, so you never see a mix of
+          pre- and post-filter sentences. It is a view control only — SD logging, the TCP stream and the
+          sky plot still see every sentence.</p>
+      </div>
+      <div>
+        <h3>LIGHT</h3>
+        <p>Opens a modal brightness overlay. Drag anywhere on the track; the level follows the finger
+          rather than waiting for release. The slider floor is 8/255 — going fully dark is OFF's job,
+          since a slider that blanks the screen leaves no way back to itself.</p>
+      </div>
+      <div>
+        <h3>SLEEP</h3>
+        <p>Blanks the panel and drops the Wi-Fi AP. Ingestion, SD logging and trip stats keep running —
+          for a logger, screen off means keep recording in your pocket. Tap anywhere to wake; that tap
+          is consumed rather than hitting whatever was underneath.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <div class="rule-head">
+      <h2>Palette</h2>
+      <span class="tag">rgb565 &middot; src/main.cpp</span>
+    </div>
+    <p class="section-note">
+      Twelve colours, declared once as <code>constexpr</code> and quantised to 16 bits at compile time.
+      Swatches show the source RGB; the code beneath is what the panel receives.
+    </p>
+    <div class="swatches" id="swatches"></div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <div class="rule-head">
+      <h2>Layout</h2>
+      <span class="tag">Computed at boot from panel size</span>
+    </div>
+    <p class="section-note">
+      <code>computeLayout()</code> derives every rectangle from the live panel dimensions and four
+      constants: a 16&nbsp;px margin, a 56&nbsp;px top bar, a 190&nbsp;px log card and a 36&nbsp;px card
+      header. These are the results at 1280&times;720.
+    </p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Region</th><th>x</th><th>y</th><th>w</th><th>h</th><th>Derived from</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Top bar</td><td class="mono">0</td><td class="mono">0</td><td class="mono">1280</td><td class="mono">56</td><td>TOPBAR_H</td></tr>
+          <tr><td>Fix card</td><td class="mono">16</td><td class="mono">72</td><td class="mono">443</td><td class="mono">426</td><td>36% of content width</td></tr>
+          <tr><td>Sky card</td><td class="mono">475</td><td class="mono">72</td><td class="mono">789</td><td class="mono">426</td><td>remainder</td></tr>
+          <tr><td>Log card (collapsed)</td><td class="mono">16</td><td class="mono">514</td><td class="mono">1248</td><td class="mono">190</td><td>LOGCARD_H, bottom-anchored</td></tr>
+          <tr><td>Log card (expanded)</td><td class="mono">16</td><td class="mono">72</td><td class="mono">1248</td><td class="mono">632</td><td>full content area</td></tr>
+          <tr><td>Card interior</td><td class="mono">+18</td><td class="mono">+44</td><td class="mono">&minus;36</td><td class="mono">&minus;60</td><td>innerOf(), header + padding</td></tr>
+          <tr><td>Radar circle</td><td class="mono">670</td><td class="mono">299</td><td class="mono" colspan="2">r = 159</td><td>46% of sky card width</td></tr>
+          <tr><td>Brightness panel</td><td class="mono">360</td><td class="mono">255</td><td class="mono">560</td><td class="mono">210</td><td>centred</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <div class="rule-head">
+      <h2>Touch map</h2>
+      <span class="tag">Evaluated in this order, on release</span>
+    </div>
+    <p class="section-note">
+      Hit testing runs top of the list first, so a chip sitting inside a card resolves before the card
+      underneath it. Edge detection is done by hand rather than through <code>wasClicked()</code>: this
+      digitiser emits a ghost second contact, and its detail slots hold stale data once a release
+      reports zero points.
+    </p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Target</th><th>Region</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Anywhere</td><td class="mono">screen dark</td><td>Wake, and the tap is consumed</td></tr>
+          <tr><td>LIGHT</td><td class="mono">300,12 104&times;32</td><td>Open the brightness overlay</td></tr>
+          <tr><td>SLEEP</td><td class="mono">414,12 104&times;32</td><td>Blank the panel, drop the AP, keep logging</td></tr>
+          <tr><td>Satellite dot</td><td class="mono">34&nbsp;px pick radius</td><td>Detail tooltip, self-expiring after 4&nbsp;s</td></tr>
+          <tr><td>Sky card, no dot</td><td class="mono">skyCard</td><td>Dismiss the tooltip</td></tr>
+          <tr><td>Position card</td><td class="mono">fixCard</td><td>Toggle live &harr; trip</td></tr>
+          <tr><td>Filter chip</td><td class="mono">1154,519 92&times;26</td><td>Cycle filter, clear the log ring</td></tr>
+          <tr><td>Log card</td><td class="mono">logCard</td><td>Expand or collapse</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="wrap">
+    <p>
+      Reproduced from <code>src/main.cpp</code> — layout constants, palette, SNR sort order, hit radii
+      and the 200&nbsp;ms signature poll are transcribed from the source, and sky-plot dots use the same
+      polar projection the firmware draws with. The receiver behind it is simulated: sentences are
+      generated in NMEA0183 form with valid checksums, and sky motion is time-compressed so satellites
+      visibly drift.
+    </p>
+  </footer>
+</div>
+
+<script>
+  "use strict";
+
+  /* =====================================================================
+     Palette — transcribed from src/main.cpp
+     ===================================================================== */
+  const PAL = [
+    ["COLOR_BG", 9, 11, 17, "page background"],
+    ["COLOR_TOPBAR_BG", 16, 18, 27, "top bar, badges"],
+    ["COLOR_CARD_BG", 21, 24, 35, "card surface"],
+    ["COLOR_DIVIDER", 45, 50, 66, "hairlines, grid rings"],
+    ["COLOR_TEXT_PRIMARY", 236, 239, 245, "values"],
+    ["COLOR_TEXT_SECONDARY", 138, 146, 166, "labels"],
+    ["COLOR_ACCENT", 88, 168, 232, "position card"],
+    ["COLOR_ACCENT_GREEN", 96, 210, 150, "log card"],
+    ["COLOR_STATUS_GOOD", 84, 214, 140, "3D fix, strong SNR"],
+    ["COLOR_STATUS_WARN", 232, 188, 74, "2D fix, marginal SNR"],
+    ["COLOR_STATUS_BAD", 232, 92, 92, "no fix, weak SNR"],
+    ["COLOR_STATUS_NONE", 90, 96, 112, "unknown, absent"],
+  ];
+  const rgb565 = (r, g, b) => ((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3);
+
+  const C = {
+    bg: "var(--bg)", card: "var(--card)", topbar: "var(--topbar)", divider: "var(--divider)",
+    t1: "var(--t1)", t2: "var(--t2)", acc: "var(--acc)", green: "var(--accgreen)",
+    good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)", none: "var(--none)",
+  };
+
+  /* =====================================================================
+     Geometry — computeLayout() at 1280x720
+     ===================================================================== */
+  const W = 1280, H = 720, MARGIN = 16, TOPBAR_H = 56, LOGCARD_H = 190, CARD_HEADER_H = 36;
+  const RECT = {
+    fix: { x: 16, y: 72, w: 443, h: 426 },
+    sky: { x: 475, y: 72, w: 789, h: 426 },
+    log: { x: 16, y: 514, w: 1248, h: 190 },
+    logBig: { x: 16, y: 72, w: 1248, h: 632 },
+  };
+  const inner = (r) => ({ x: r.x + 18, y: r.y + CARD_HEADER_H + 8, w: r.w - 36, h: r.h - CARD_HEADER_H - 24 });
+  const hit = (px, py, r) => px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
+
+  const LIGHT_BTN = { x: 300, y: 12, w: 104, h: 32 };
+  const SLEEP_BTN = { x: 414, y: 12, w: 104, h: 32 };
+  const filterChipRect = () => ({
+    x: LOGRECT().x + LOGRECT().w - 18 - 92,
+    y: LOGRECT().y + (CARD_HEADER_H - 26) / 2, w: 92, h: 26,
+  });
+  const LOGRECT = () => (UI.logExpanded ? RECT.logBig : RECT.log);
+
+  const DIM = {
+    panel: { x: 360, y: 255, w: 560, h: 210 },
+    track: { x: 390, y: 337, w: 500, h: 26 },
+    off: { x: 390, y: 403, w: 150, h: 44 },
+    done: { x: 720, y: 403, w: 150, h: 44 },
+  };
+
+  /* =====================================================================
+     Simulated receiver
+     ===================================================================== */
+  const CONSTELLATIONS = [
+    ["GP", [10, 12, 15, 18, 24, 32, 21, 8]],
+    ["BD", [7, 13, 21]],
+    ["GL", [3, 9]],
+    ["GA", [5, 11, 27]],
+  ];
+
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
+
+  function makeSats() {
+    const out = [];
+    CONSTELLATIONS.forEach(([t, prns]) => {
+      prns.forEach((prn) => {
+        out.push({
+          t, prn,
+          el: Math.round(rnd(5, 85)),
+          az: Math.round(rnd(0, 359)),
+          snr: Math.round(rnd(14, 50)),
+          drift: rnd(0.6, 1.8) * (Math.random() < 0.5 ? -1 : 1),
+          elRate: rnd(-0.06, 0.06),
+          visible: true,
+        });
+      });
+    });
+    return out;
+  }
+
+  const SIM = {
+    t: 0,                     // ms of simulated uptime
+    scenario: "drive",
+    sats: makeSats(),
+    fixType: 3,
+    lat: 41.878114, lon: -87.629798,
+    alt: 181.4, spd: 42.0, crs: 214.7,
+    hdop: 0.9, pdop: 1.6, vdop: 1.2,
+    satsUsed: 9,
+    locValid: true,
+    hdopHistory: [], hdopHead: 0,
+    tripKm: 0, maxSpeed: 0, ttff: 0, firstFixAt: 0,
+    battery: 82, apClients: 1, sdReady: true,
+    lastSentenceMs: 0,
+    logRing: [], counts: {},
+    pending: [],
+    utc: new Date(Date.UTC(2026, 7, 14, 14, 32, 7)),
+  };
+  const SENTENCE_TYPES = ["GGA", "RMC", "GSV", "GSA", "GLL", "VTG", "ZDA", "TXT", "OTH"];
+  SENTENCE_TYPES.forEach((s) => (SIM.counts[s] = 0));
+
+  function setScenario(name) {
+    SIM.scenario = name;
+    SIM.sats = makeSats();
+    SIM.pending.length = 0;
+    if (name === "cold") {
+      SIM.t = 0;
+      SIM.fixType = 1;
+      SIM.locValid = false;
+      SIM.satsUsed = 0;
+      SIM.spd = 0;
+      SIM.hdop = 9.9;
+      SIM.tripKm = 0; SIM.maxSpeed = 0; SIM.ttff = 0; SIM.firstFixAt = 0;
+      SIM.hdopHistory = []; SIM.hdopHead = 0;
+      SIM.sats.forEach((s) => { s.visible = false; s.snr = -1; });
+      SIM.logRing = [];
+      SENTENCE_TYPES.forEach((s) => (SIM.counts[s] = 0));
+    } else if (name === "canyon") {
+      SIM.locValid = true;
+      SIM.spd = 18;
+      SIM.sats.forEach((s) => {
+        s.visible = s.el > 45 || Math.random() < 0.35;
+        s.snr = s.visible ? Math.round(rnd(8, 32)) : -1;
+      });
+    } else {
+      SIM.locValid = true;
+      SIM.spd = 42;
+      SIM.fixType = 3;
+      if (!SIM.firstFixAt) { SIM.firstFixAt = SIM.t; SIM.ttff = 27400; }
+      SIM.sats.forEach((s) => { s.visible = true; s.snr = Math.round(rnd(20, 50)); });
+    }
+  }
+
+  // NMEA0183 checksum: XOR of everything between '$' and '*'.
+  function nmea(body) {
+    let ck = 0;
+    for (let i = 0; i < body.length; i++) ck ^= body.charCodeAt(i);
+    return "$" + body + "*" + ck.toString(16).toUpperCase().padStart(2, "0");
+  }
+  const deg = (v, w, neg, pos) => {
+    const a = Math.abs(v);
+    const d = Math.floor(a);
+    const m = (a - d) * 60;
+    return `${String(d).padStart(w, "0")}${m.toFixed(4).padStart(7, "0")},${v < 0 ? neg : pos}`;
+  };
+  const hms = (d) => `${String(d.getUTCHours()).padStart(2, "0")}${String(d.getUTCMinutes()).padStart(2, "0")}${String(d.getUTCSeconds()).padStart(2, "0")}.00`;
+  const dmy = (d) => `${String(d.getUTCDate()).padStart(2, "0")}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCFullYear() % 100).padStart(2, "0")}`;
+
+  function emitSentences() {
+    const s = SIM;
+    const used = s.sats.filter((x) => x.visible && x.snr >= 25).slice(0, 12);
+    const t = hms(s.utc);
+    const pos = `${deg(s.lat, 2, "S", "N")},${deg(s.lon, 3, "W", "E")}`;
+    const q = [];
+
+    q.push(nmea(`GNGGA,${t},${pos},${s.fixType > 1 ? 1 : 0},${String(s.satsUsed).padStart(2, "0")},${s.hdop.toFixed(1)},${s.alt.toFixed(1)},M,-33.7,M,,`));
+    q.push(nmea(`GNRMC,${t},${s.fixType > 1 ? "A" : "V"},${pos},${(s.spd / 1.852).toFixed(2)},${s.crs.toFixed(1)},${dmy(s.utc)},,,${s.fixType > 1 ? "A" : "N"}`));
+    q.push(nmea(`GNGSA,A,${s.fixType},${used.slice(0, 12).map((x) => String(x.prn).padStart(2, "0")).join(",").padEnd(35, ",")},${s.pdop.toFixed(1)},${s.hdop.toFixed(1)},${s.vdop.toFixed(1)}`));
+
+    CONSTELLATIONS.forEach(([talker]) => {
+      const vis = s.sats.filter((x) => x.t === talker && x.visible);
+      if (!vis.length) return;
+      const msgs = Math.ceil(vis.length / 4);
+      for (let m = 0; m < msgs; m++) {
+        const grp = vis.slice(m * 4, m * 4 + 4);
+        const body = grp.map((x) =>
+          `${String(x.prn).padStart(2, "0")},${String(Math.round(x.el)).padStart(2, "0")},${String(Math.round(x.az)).padStart(3, "0")},${x.snr < 0 ? "" : String(x.snr).padStart(2, "0")}`
+        ).join(",");
+        q.push(nmea(`${talker}GSV,${msgs},${m + 1},${String(vis.length).padStart(2, "0")},${body}`));
+      }
+    });
+
+    q.push(nmea(`GNGLL,${pos},${t},${s.fixType > 1 ? "A" : "V"},A`));
+    q.push(nmea(`GNVTG,${s.crs.toFixed(1)},T,,M,${(s.spd / 1.852).toFixed(2)},N,${s.spd.toFixed(2)},K,A`));
+    q.push(nmea(`GNZDA,${t},${String(s.utc.getUTCDate()).padStart(2, "0")},${String(s.utc.getUTCMonth() + 1).padStart(2, "0")},${s.utc.getUTCFullYear()},00,00`));
+
+    s.pending.push(...q);
+  }
+
+  const typeOf = (line) => {
+    const m = /^\$..(...)/.exec(line);
+    if (!m) return "OTH";
+    return SENTENCE_TYPES.includes(m[1]) ? m[1] : "OTH";
+  };
+  const passesFilter = (type) =>
+    UI.filter === 1 ? type !== "GSV" : UI.filter === 2 ? (type === "GGA" || type === "RMC") : true;
+
+  // Drain the queue a few sentences at a time, so the log scrolls the way the
+  // real stream does rather than jumping a full second at once.
+  function drainPending() {
+    for (let i = 0; i < 3 && SIM.pending.length; i++) {
+      const line = SIM.pending.shift();
+      const type = typeOf(line);
+      SIM.counts[type]++;                 // counters see everything
+      SIM.lastSentenceMs = SIM.t;
+      if (!passesFilter(type)) continue;  // the filter is a view control only
+      SIM.logRing.push(line);
+      if (SIM.logRing.length > 40) SIM.logRing.shift();
+    }
+  }
+
+  function stepGps(dtMs) {
+    const s = SIM;
+    s.t += dtMs;
+    const dt = dtMs / 1000;
+    s.utc = new Date(s.utc.getTime() + dtMs);
+
+    // Sky motion, time-compressed so drift is visible in a session.
+    s.sats.forEach((x) => {
+      x.az = (x.az + x.drift * dt + 360) % 360;
+      x.el = clamp(x.el + x.elRate * dt, 3, 88);
+      if (x.visible && x.snr >= 0) x.snr = Math.round(clamp(x.snr + rnd(-1.5, 1.5), 4, 52));
+    });
+
+    if (s.scenario === "cold") {
+      // Acquisition: one satellite comes up roughly every 1.2 s, SNR climbing.
+      const want = Math.min(s.sats.length, Math.floor(s.t / 1200));
+      s.sats.forEach((x, i) => {
+        if (i < want && !x.visible) { x.visible = true; x.snr = Math.round(rnd(12, 22)); }
+        if (x.visible && x.snr < 44 && Math.random() < 0.25) x.snr += 1;
+      });
+    } else if (s.scenario === "canyon") {
+      // Buildings cut satellites in and out.
+      if (Math.random() < 0.12) {
+        const x = s.sats[Math.floor(Math.random() * s.sats.length)];
+        x.visible = !x.visible;
+        x.snr = x.visible ? Math.round(rnd(8, 30)) : -1;
+      }
+    }
+
+    const usable = s.sats.filter((x) => x.visible && x.snr >= 25 && x.el >= 8);
+    s.satsUsed = usable.length;
+    s.fixType = usable.length >= 5 ? 3 : usable.length >= 3 ? 2 : 1;
+    s.locValid = s.fixType > 1;
+
+    const targetHdop = s.scenario === "canyon" ? 3.6 : s.fixType === 3 ? 0.9 : s.fixType === 2 ? 2.4 : 9.9;
+    s.hdop = clamp(s.hdop + (targetHdop - s.hdop) * 0.25 + rnd(-0.08, 0.08), 0.5, 25);
+    s.pdop = s.hdop * 1.7;
+    s.vdop = s.hdop * 1.3;
+
+    if (s.locValid) {
+      if (!s.firstFixAt) { s.firstFixAt = s.t; s.ttff = s.t; }
+      const targetSpd = s.scenario === "canyon" ? 18 : s.scenario === "cold" ? 0 : 46;
+      s.spd = clamp(s.spd + (targetSpd - s.spd) * 0.1 + rnd(-1.5, 1.5), 0, 130);
+      s.crs = (s.crs + rnd(-2.5, 2.5) + 360) % 360;
+      s.alt += rnd(-0.6, 0.6);
+
+      const km = (s.spd / 3600) * dt;
+      s.tripKm += km;
+      s.maxSpeed = Math.max(s.maxSpeed, s.spd);
+      const rad = (s.crs * Math.PI) / 180;
+      s.lat += (km * Math.cos(rad)) / 110.574;
+      s.lon += (km * Math.sin(rad)) / (111.32 * Math.cos((s.lat * Math.PI) / 180));
+    } else {
+      s.spd = 0;
+    }
+
+    s.hdopHistory.push(s.hdop);
+    if (s.hdopHistory.length > 40) s.hdopHistory.shift();
+
+    if (s.t % 90000 < dtMs && s.battery > 5) s.battery--;
+    emitSentences();
+  }
+
+  /* =====================================================================
+     UI state — the firmware's loop()-owned variables
+     ===================================================================== */
+  const UI = {
+    view: "live",        // live | trip
+    logExpanded: false,
+    filter: 0,           // 0 ALL, 1 NO GSV, 2 POS
+    tooltip: null,       // { sat, at }
+    dimmerOpen: false,
+    brightness: 158,     // 8..255
+    backlightOff: false,
+    asleep: false,
+    press: null,         // LIGHT | SLEEP | FILTER | DIM_OFF | DIM_DONE
+    skyDots: [],
+  };
+  const BRIGHTNESS_MIN = 8, BRIGHTNESS_MAX = 255;
+
+  /* =====================================================================
+     Drawing — one builder per panel, mirroring the firmware's draw*Panel()
+     ===================================================================== */
+  const el = (cls, style, html) =>
+    `<div class="${cls}" style="${style}">${html === undefined ? "" : html}</div>`;
+  const at = (x, y, extra) => `left:${x}px;top:${y}px;${extra || ""}`;
+
+  const snrColor = (s) => (s < 0 ? C.none : s < 20 ? C.bad : s < 35 ? C.warn : C.good);
+  const bucket = (s) => (s < 0 ? -1 : Math.floor(s / 3));
+  const visibleSats = () => SIM.sats.filter((s) => s.visible);
+  const sortedSats = () =>
+    visibleSats().slice().sort((a, b) => {
+      if (bucket(a.snr) !== bucket(b.snr)) return bucket(b.snr) - bucket(a.snr);
+      if (a.t !== b.t) return a.t < b.t ? -1 : 1;
+      return a.prn - b.prn;
+    });
+  const hdopQuality = (h) =>
+    h < 1 ? ["EXCELLENT", C.good] : h < 2.5 ? ["GOOD", C.good] : h < 5 ? ["FAIR", C.warn] : ["POOR", C.bad];
+
+  function cardFrame(r, label, accent) {
+    return el("abs card", at(r.x, r.y, `width:${r.w}px;height:${r.h}px`),
+      `<div class="hdr">${label}</div><div class="hrule" style="width:${r.w - 36}px;background:${accent}"></div>`);
+  }
+
+  function drawChrome() {
+    let h = "";
+    if (!UI.logExpanded) {
+      h += cardFrame(RECT.fix,
+        UI.view === "trip" ? "TRIP STATS&nbsp; (tap: live)" : "POSITION&nbsp; (tap: trip stats)", C.acc);
+      h += cardFrame(RECT.sky, "SATELLITES&nbsp; (tap a dot for detail)", C.acc);
+    }
+    h += cardFrame(LOGRECT(),
+      UI.logExpanded ? "NMEA STREAM&nbsp; (tap to collapse)" : "NMEA STREAM&nbsp; (tap to expand)", C.green);
+    document.getElementById("l-chrome").innerHTML = h;
+  }
+
+  function drawStatusBar() {
+    const live = SIM.t - SIM.lastSentenceMs < 5000 && SIM.lastSentenceMs > 0;
+    const batt = SIM.battery;
+    const battColor = batt < 20 ? C.bad : batt < 40 ? C.warn : C.good;
+    const ap = UI.asleep ? 0 : SIM.apClients;
+
+    const badges = [
+      `<div class="badge"><span class="dot" style="background:${SIM.sdReady ? C.good : C.none}"></span>${SIM.sdReady ? "SD" : "NO SD"}</div>`,
+      `<div class="badge"><span class="dot" style="background:${ap > 0 ? C.good : C.t2}"></span>AP ${ap}</div>`,
+      `<div class="badge"><div class="batt"><i style="width:${batt}%;background:${battColor}"></i></div>${batt}%</div>`,
+      `<div class="badge"><span class="dot" style="background:${live ? C.good : C.bad}"></span>${live ? "RECEIVING" : "NO DATA"}</div>`,
+    ].join("");
+
+    document.getElementById("l-top").innerHTML =
+      el("abs topbar", at(0, 0)) +
+      el("abs title", at(16, 15), "TAB5 GPS MONITOR") +
+      el(`abs chip light${UI.press === "LIGHT" ? " pressed" : ""}`, "", "LIGHT") +
+      el(`abs chip sleep${UI.press === "SLEEP" ? " pressed" : ""}`, "", "SLEEP") +
+      el("abs badgerow", "", badges);
+  }
+
+  function drawFixPanel() {
+    if (UI.logExpanded) { document.getElementById("l-fix").innerHTML = ""; return; }
+    const r = inner(RECT.fix);
+    const fixStr = SIM.fixType === 3 ? "3D FIX" : SIM.fixType === 2 ? "2D FIX" : "NO FIX";
+    const fixColor = SIM.fixType === 3 ? C.good : SIM.fixType === 2 ? C.warn : C.bad;
+
+    let h = el("abs pill", at(r.x, r.y, `background:${fixColor};color:var(--bg)`), fixStr);
+    h += el("abs pill", `right:${W - (r.x + r.w)}px;top:${r.y}px;background:${C.topbar};color:${C.t1}`,
+      `${SIM.satsUsed}/${visibleSats().length} SATS`);
+
+    if (UI.view === "trip") {
+      const colW = Math.floor(r.w / 2);
+      const elapsed = SIM.firstFixAt ? SIM.t - SIM.firstFixAt : 0;
+      const avg = elapsed > 2000 ? SIM.tripKm / (elapsed / 3600000) : 0;
+      const secs = Math.floor(elapsed / 1000);
+      const clock = [Math.floor(secs / 3600), Math.floor(secs / 60) % 60, secs % 60]
+        .map((v) => String(v).padStart(2, "0")).join(":");
+
+      const pair = (y, a, b) => {
+        h += el("abs lbl", at(r.x, y), a[0]) + el("abs val", at(r.x, y + 20), a[1]);
+        h += el("abs lbl", at(r.x + colW, y), b[0]) + el("abs val", at(r.x + colW, y + 20), b[1]);
+      };
+      pair(168, ["DISTANCE", SIM.tripKm.toFixed(2) + " km"], ["MAX SPEED", SIM.maxSpeed.toFixed(1) + " km/h"]);
+      pair(232, ["TRIP TIME", clock], ["AVG SPEED", avg.toFixed(1) + " km/h"]);
+
+      h += el("abs lbl", at(r.x, 300),
+        SIM.ttff ? `TIME TO FIRST FIX: ${(SIM.ttff / 1000).toFixed(1)}s` : "TIME TO FIRST FIX: --");
+      h += el("abs lbl", at(r.x, 336), "HDOP TREND");
+
+      const hist = SIM.hdopHistory;
+      const sw = r.w, sh = 28, sx = r.x, sy = 358;
+      let spark = `<rect x="${sx}" y="${sy}" width="${sw}" height="${sh}" fill="${C.bg}"></rect>`;
+      if (hist.length > 1) {
+        const pts = hist.map((v, i) =>
+          `${(sx + (i / (hist.length - 1)) * sw).toFixed(1)},${(sy + sh - Math.min(v / 5, 1) * sh).toFixed(1)}`
+        ).join(" ");
+        spark += `<polyline points="${pts}" fill="none" stroke="${C.acc}" stroke-width="1.5"></polyline>`;
+      }
+      h += `<svg class="abs" style="${at(sx, sy, `width:${sw}px;height:${sh}px`)}"
+              viewBox="${sx} ${sy} ${sw} ${sh}" aria-hidden="true">${spark}</svg>`;
+      document.getElementById("l-fix").innerHTML = h;
+      return;
+    }
+
+    h += el("abs lbl", at(r.x, 168), "LATITUDE");
+    h += el("abs hero", at(r.x, 188), SIM.locValid ? SIM.lat.toFixed(6) : "---");
+    h += el("abs lbl", at(r.x, 254), "LONGITUDE");
+    h += el("abs hero", at(r.x, 274), SIM.locValid ? SIM.lon.toFixed(6) : "---");
+
+    const colW = Math.floor(r.w / 3);
+    const stats = [
+      ["ALT", SIM.locValid ? Math.round(SIM.alt) + "m" : "---"],
+      ["SPEED", SIM.locValid ? SIM.spd.toFixed(1) + "km/h" : "---"],
+      ["CRS", SIM.locValid ? Math.round(SIM.crs) + "°" : "---"],
+    ];
+    stats.forEach(([l, v], i) => {
+      h += el("abs lbl", at(r.x + colW * i, 348), l);
+      h += el("abs val", at(r.x + colW * i, 366), v);
+    });
+
+    const half = Math.floor(r.w / 2);
+    const [qLabel, qColor] = hdopQuality(SIM.hdop);
+    const hdopStr = SIM.locValid ? SIM.hdop.toFixed(1) : "--";
+    h += el("abs lbl", at(r.x, 406), "ACCURACY (HDOP)");
+    h += el("abs val", at(r.x, 426), hdopStr);
+    h += el("abs qbadge", at(r.x + 14 + hdopStr.length * 13, 428,
+      `background:${SIM.locValid ? qColor : C.none}`), SIM.locValid ? qLabel : "NO FIX");
+    h += el("abs lbl", at(r.x, 462), `PDOP ${SIM.pdop.toFixed(1)}&nbsp; VDOP ${SIM.vdop.toFixed(1)}`);
+
+    const d = SIM.utc;
+    h += el("abs lbl", at(r.x + half, 406), "TIME (UTC)");
+    h += el("abs val", at(r.x + half, 426),
+      [d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()].map((v) => String(v).padStart(2, "0")).join(":"));
+    h += el("abs lbl", at(r.x + half, 462),
+      `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`);
+
+    document.getElementById("l-fix").innerHTML = h;
+  }
+
+  function drawSatPanel() {
+    if (UI.logExpanded) {
+      document.getElementById("l-sky").innerHTML = "";
+      UI.skyDots = [];
+      return;
+    }
+    const r = inner(RECT.sky);
+    const diameter = Math.min(r.h, Math.floor(r.w * 0.46));
+    const radius = Math.floor(diameter / 2) - 14;
+    const cx = r.x + Math.floor(diameter / 2) + 4;
+    const cy = r.y + Math.floor(r.h / 2);
+
+    let h = el("abs radar-face", at(cx - radius, cy - radius, `width:${radius * 2}px;height:${radius * 2}px`));
+    [radius, Math.floor((radius * 2) / 3), Math.floor(radius / 3)].forEach((rr) => {
+      h += el("abs ring", at(cx - rr, cy - rr, `width:${rr * 2}px;height:${rr * 2}px`));
+    });
+    h += el("abs cross", at(cx - radius, cy, `width:${radius * 2}px;height:1px`));
+    h += el("abs cross", at(cx, cy - radius, `width:1px;height:${radius * 2}px`));
+    [["N", cx, cy - radius - 11], ["S", cx, cy + radius + 11],
+     ["E", cx + radius + 11, cy], ["W", cx - radius - 11, cy]].forEach(([s, lx, ly]) => {
+      h += el("abs f0 t2", at(lx - 3, ly - 4), s);
+    });
+
+    // Course needle, only above 1 km/h — course-over-ground is noise below that.
+    if (SIM.locValid && SIM.spd > 1) {
+      const a = (SIM.crs * Math.PI) / 180;
+      const tx = cx + radius * 0.85 * Math.sin(a);
+      const ty = cy - radius * 0.85 * Math.cos(a);
+      h += `<svg class="abs" style="${at(0, 0, `width:${W}px;height:${H}px`)}" aria-hidden="true">
+              <line x1="${cx}" y1="${cy}" x2="${tx.toFixed(1)}" y2="${ty.toFixed(1)}"
+                    stroke="${C.acc}" stroke-width="2" stroke-linecap="round"></line>
+              <circle cx="${cx}" cy="${cy}" r="4" fill="${C.acc}"></circle>
+            </svg>`;
+    }
+
+    UI.skyDots = [];
+    visibleSats().forEach((s) => {
+      if (s.el < 0 || s.az < 0) return;
+      const az = (s.az * Math.PI) / 180;
+      const rr = (radius * (90 - s.el)) / 90;
+      const x = cx + rr * Math.sin(az);
+      const y = cy - rr * Math.cos(az);
+      const dotR = s.snr < 0 ? 4 : 4 + (Math.min(s.snr, 55) / 55) * 5;
+      h += el("abs satdot",
+        at(x - dotR, y - dotR, `width:${dotR * 2}px;height:${dotR * 2}px;background:${snrColor(s.snr)}`));
+      UI.skyDots.push({ x, y, sat: s });
+    });
+
+    const listX = r.x + diameter + 24;
+    const listW = r.x + r.w - listX;
+    const barX = listX + 56;
+    const barW = Math.max(10, listW - 56 - 34);
+    h += el("abs lbl", at(listX, r.y), "SIGNAL");
+    let rowY = r.y + 26;
+    const maxRows = Math.floor((r.y + r.h - rowY) / 24);
+    sortedSats().slice(0, maxRows).forEach((s) => {
+      const bw = s.snr < 0 ? 2 : Math.max(2, Math.round((Math.min(s.snr, 55) / 55) * barW));
+      h += el("abs f2", at(listX, rowY), `${s.t}${s.prn}`);
+      h += el("abs sigbar", at(barX, rowY + 2, `width:${barW}px;background:${C.bg}`));
+      h += el("abs sigbar", at(barX, rowY + 2, `width:${bw}px;background:${snrColor(s.snr)}`));
+      h += el("abs f2 t2", at(barX + barW + 6, rowY), s.snr < 0 ? "-" : s.snr);
+      rowY += 24;
+    });
+
+    if (UI.tooltip && SIM.t - UI.tooltip.at <= 4000) {
+      const s = UI.tooltip.sat;
+      const text = `${s.t}${s.prn}&nbsp; EL ${Math.round(s.el)}&nbsp; AZ ${Math.round(s.az)}&nbsp; SNR ${s.snr < 0 ? "-" : s.snr}`;
+      h += el("abs tooltip", at(r.x + r.w / 2 - 115, r.y + r.h - 36, `background:${snrColor(s.snr)}`), text);
+    } else if (UI.tooltip) {
+      UI.tooltip = null;
+    }
+
+    document.getElementById("l-sky").innerHTML = h;
+  }
+
+  function drawLogPanel() {
+    const rect = LOGRECT();
+    const r = inner(rect);
+    const big = UI.logExpanded;
+    const fc = filterChipRect();
+    const label = ["ALL", "NO GSV", "POS"][UI.filter];
+
+    let h = el(`abs filterchip${UI.filter !== 0 ? " on" : ""}${UI.press === "FILTER" ? " pressed" : ""}`,
+      at(fc.x, fc.y), label);
+
+    const rowH = big ? 32 : 21;
+    const size = big ? 22 : 14;
+    const maxRows = Math.floor(r.h / rowH);
+    const lines = SIM.logRing.slice(-maxRows);
+    // Bottom-anchored: the newest sentence sits on the final row even before
+    // the ring buffer has filled.
+    const y0 = r.y + (maxRows - lines.length) * rowH;
+    lines.forEach((line, i) => {
+      h += el("abs log", at(r.x, y0 + i * rowH, `font-size:${size}px`), line);
+    });
+
+    if (!big) {
+      const dividerX = r.x + (r.w - 220 - 24) + 12;
+      h += el("abs", at(dividerX, r.y, `width:1px;height:${r.h}px;background:${C.divider}`));
+      const cx0 = dividerX + 12;
+      h += el("abs lbl", at(cx0, r.y), "SENTENCE TYPES");
+      SENTENCE_TYPES.forEach((name, i) => {
+        const n = SIM.counts[name];
+        const col = i % 2, row = (i - col) / 2;
+        h += el("abs counters", at(cx0 + col * 116, r.y + 24 + row * 24,
+          `color:${n > 0 ? C.t1 : C.none}`), `${name.padEnd(4, " ")}${n}`);
+      });
+    }
+    document.getElementById("l-log").innerHTML = h;
+  }
+
+  function drawOverlay() {
+    const box = document.getElementById("l-overlay");
+    if (!UI.dimmerOpen) { box.innerHTML = ""; return; }
+    const pct = Math.round(((UI.brightness - BRIGHTNESS_MIN) * 100) / (BRIGHTNESS_MAX - BRIGHTNESS_MIN));
+    const fill = Math.max(DIM.track.h, Math.round((DIM.track.w * pct) / 100));
+    const knobX = clamp(DIM.track.x + fill, DIM.track.x + 13, DIM.track.x + DIM.track.w - 13);
+    box.innerHTML =
+      el("abs overlay-panel", "") +
+      el("abs lbl", at(390, 277), "BRIGHTNESS") +
+      el("abs val", `right:${W - 890}px;top:271px`, `${pct}%`) +
+      el("abs track", "", `<i style="width:${fill}px"></i>`) +
+      el("abs knob", `left:${knobX - 17}px`) +
+      el(`abs ovchip${UI.press === "DIM_OFF" ? " pressed" : ""}`, "left:390px", "OFF") +
+      el(`abs ovchip${UI.press === "DIM_DONE" ? " pressed" : ""}`, "left:720px", "DONE");
+  }
+
+  /* =====================================================================
+     Signatures + dirty-panel render loop (the firmware's loop() cadence)
+     ===================================================================== */
+  const LED = { status: 0, fix: 0, sky: 0, log: 0 };
+  const sigs = { status: "", fix: "", sky: "", log: "" };
+  let relayoutPending = true;
+
+  const sigStatus = () => [
+    SIM.t - SIM.lastSentenceMs < 5000, SIM.battery, UI.asleep ? 0 : SIM.apClients,
+    SIM.sdReady, UI.press,
+  ].join("|");
+
+  const sigFix = () => UI.view === "trip"
+    ? ["trip", SIM.tripKm.toFixed(2), SIM.maxSpeed.toFixed(1), Math.floor((SIM.t - SIM.firstFixAt) / 1000),
+       SIM.ttff, SIM.hdopHistory.length, SIM.hdop.toFixed(1)].join("|")
+    : ["live", SIM.fixType, SIM.satsUsed, visibleSats().length,
+       SIM.locValid ? SIM.lat.toFixed(6) : "-", SIM.locValid ? SIM.lon.toFixed(6) : "-",
+       Math.round(SIM.alt), SIM.spd.toFixed(1), Math.round(SIM.crs),
+       SIM.hdop.toFixed(1), SIM.utc.getUTCSeconds()].join("|");
+
+  const sigSky = () =>
+    visibleSats().map((s) => `${s.t}${s.prn}:${Math.round(s.el)}:${Math.round(s.az)}:${s.snr}`).join(",") +
+    "|" + (UI.tooltip ? `${UI.tooltip.sat.t}${UI.tooltip.sat.prn}` : "-") +
+    "|" + (SIM.locValid && SIM.spd > 1 ? Math.round(SIM.crs) : "-");
+
+  const sigLog = () =>
+    [SIM.logRing.length, SIM.logRing[SIM.logRing.length - 1] || "", UI.filter, UI.press,
+     SENTENCE_TYPES.map((t) => SIM.counts[t]).join(",")].join("|");
+
+  function flash(name) {
+    LED[name]++;
+    const led = document.getElementById("led-" + name);
+    led.classList.add("on");
+    document.getElementById("n-" + name).textContent = LED[name];
+    setTimeout(() => led.classList.remove("on"), 90);
+  }
+
+  function renderTick(force) {
+    if (UI.asleep || UI.backlightOff) return;
+
+    const full = force || relayoutPending;
+    relayoutPending = false;
+    if (full) drawChrome();
+
+    const next = { status: sigStatus(), fix: sigFix(), sky: sigSky(), log: sigLog() };
+    if (full || next.status !== sigs.status) { drawStatusBar(); flash("status"); }
+    if (!UI.logExpanded && (full || next.fix !== sigs.fix)) { drawFixPanel(); flash("fix"); }
+    else if (UI.logExpanded && full) drawFixPanel();
+    if (!UI.logExpanded && (full || next.sky !== sigs.sky)) { drawSatPanel(); flash("sky"); }
+    else if (UI.logExpanded && full) drawSatPanel();
+    if (full || next.log !== sigs.log) { drawLogPanel(); flash("log"); }
+    Object.assign(sigs, next);
+
+    drawOverlay();
+    updateStatusLine();
+  }
+
+  function relayout() {
+    relayoutPending = true;
+    renderTick(true);
+  }
+
+  function updateStatusLine() {
+    const secs = Math.floor(SIM.t / 1000);
+    document.getElementById("s-uptime").textContent =
+      `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
+    document.getElementById("s-fix").textContent =
+      SIM.fixType === 3 ? "3D FIX" : SIM.fixType === 2 ? "2D FIX" : "NO FIX";
+    document.getElementById("s-sats").textContent = `${SIM.satsUsed}/${visibleSats().length}`;
+    document.getElementById("s-state").textContent =
+      UI.asleep ? "asleep — tap the panel to wake"
+      : UI.backlightOff ? "backlight off — tap the panel to wake"
+      : UI.dimmerOpen ? "brightness overlay"
+      : UI.logExpanded ? "NMEA expanded"
+      : UI.view === "trip" ? "trip stats" : "live position";
+  }
+
+  /* =====================================================================
+     Touch — mirrors the release-driven hit testing in loop()
+     ===================================================================== */
+  const stage = document.getElementById("stage");
+  const screen = document.getElementById("screen");
+  const darkLayer = document.getElementById("l-dark");
+
+  function toDevice(ev) {
+    const box = stage.getBoundingClientRect();
+    const s = box.width / W;
+    return { x: (ev.clientX - box.left) / s, y: (ev.clientY - box.top) / s };
+  }
+
+  function hitChips(x, y) {
+    if (UI.dimmerOpen) {
+      if (hit(x, y, DIM.off)) return "DIM_OFF";
+      if (hit(x, y, DIM.done)) return "DIM_DONE";
+      return null;
+    }
+    if (hit(x, y, LIGHT_BTN)) return "LIGHT";
+    if (hit(x, y, SLEEP_BTN)) return "SLEEP";
+    if (hit(x, y, filterChipRect())) return "FILTER";
+    return null;
+  }
+
+  function hitSkyDot(px, py) {
+    let best = null, bestDist = 34 * 34;
+    UI.skyDots.forEach((d) => {
+      const dx = px - d.x, dy = py - d.y;
+      const dsq = dx * dx + dy * dy;
+      if (dsq <= bestDist) { bestDist = dsq; best = d; }
+    });
+    return best;
+  }
+
+  function setBrightnessFromTouch(tx) {
+    const rel = clamp(tx - DIM.track.x, 0, DIM.track.w);
+    UI.brightness = Math.round(BRIGHTNESS_MIN + ((BRIGHTNESS_MAX - BRIGHTNESS_MIN) * rel) / DIM.track.w);
+    applyBrightness();
+  }
+
+  // The panel's own backlight, approximated: the firmware sends the level as a
+  // DCS 0x51 write, which this page can only stand in for by dimming the render.
+  function applyBrightness() {
+    const lit = UI.asleep || UI.backlightOff ? 0 : UI.brightness / BRIGHTNESS_MAX;
+    screen.style.filter = lit >= 0.99 ? "" : `brightness(${(0.25 + 0.75 * lit).toFixed(3)})`;
+  }
+
+  function wake() {
+    UI.asleep = false;
+    UI.backlightOff = false;
+    darkLayer.hidden = true;
+    applyBrightness();
+    relayout();
+  }
+
+  function goDark(sleep) {
+    if (sleep) UI.asleep = true; else UI.backlightOff = true;
+    UI.dimmerOpen = false;
+    UI.press = null;
+    darkLayer.hidden = false;
+    applyBrightness();
+    updateStatusLine();
+  }
+
+  let pointerDown = false;
+
+  stage.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    stage.setPointerCapture(ev.pointerId);
+    pointerDown = true;
+    if (UI.asleep || UI.backlightOff) return;
+    const { x, y } = toDevice(ev);
+    UI.press = hitChips(x, y);
+    if (UI.dimmerOpen && hit(x, y, DIM.track)) setBrightnessFromTouch(x);
+    renderTick(false);
+  });
+
+  stage.addEventListener("pointermove", (ev) => {
+    if (!pointerDown || UI.asleep || UI.backlightOff) return;
+    const { x, y } = toDevice(ev);
+    UI.press = hitChips(x, y);
+    if (UI.dimmerOpen && hit(x, y, DIM.track)) setBrightnessFromTouch(x);
+    renderTick(false);
+  });
+
+  stage.addEventListener("pointerup", (ev) => {
+    pointerDown = false;
+    const { x, y } = toDevice(ev);
+    UI.press = null;
+
+    // A tap on a dark screen only restores it, and is consumed.
+    if (UI.asleep || UI.backlightOff) { wake(); return; }
+
+    if (UI.dimmerOpen) {
+      if (hit(x, y, DIM.off)) { UI.dimmerOpen = false; goDark(false); return; }
+      if (hit(x, y, DIM.done) || !hit(x, y, DIM.panel)) { UI.dimmerOpen = false; relayout(); return; }
+      renderTick(false);
+      return;
+    }
+
+    const inSky = !UI.logExpanded && hit(x, y, RECT.sky);
+    const dot = inSky ? hitSkyDot(x, y) : null;
+
+    if (hit(x, y, LIGHT_BTN)) { UI.dimmerOpen = true; renderTick(false); }
+    else if (hit(x, y, SLEEP_BTN)) { goDark(true); }
+    else if (dot) { UI.tooltip = { sat: dot.sat, at: SIM.t }; renderTick(true); }
+    else if (inSky) { if (UI.tooltip) { UI.tooltip = null; renderTick(true); } }
+    else if (!UI.logExpanded && hit(x, y, RECT.fix)) {
+      UI.view = UI.view === "live" ? "trip" : "live";
+      relayout();
+    } else if (hit(x, y, filterChipRect())) {
+      UI.filter = (UI.filter + 1) % 3;
+      SIM.logRing = [];          // clearing the ring avoids a pre/post-filter mix
+      relayout();
+    } else if (hit(x, y, LOGRECT())) {
+      UI.logExpanded = !UI.logExpanded;
+      relayout();
+    } else {
+      renderTick(false);
+    }
+  });
+
+  stage.addEventListener("pointercancel", () => { pointerDown = false; UI.press = null; renderTick(false); });
+
+  /* =====================================================================
+     Controls
+     ===================================================================== */
+  document.getElementById("swatches").innerHTML = PAL.map(([n, r, g, b, use]) => `
+    <div class="sw">
+      <div class="chipcolor" style="background:rgb(${r},${g},${b})"></div>
+      <code class="name">${n.replace("COLOR_", "")}</code>
+      <code>rgb(${r}, ${g}, ${b})</code>
+      <code>0x${rgb565(r, g, b).toString(16).toUpperCase().padStart(4, "0")} &middot; ${use}</code>
+    </div>`).join("");
+
+  document.getElementById("scenarios").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button");
+    if (!btn) return;
+    document.querySelectorAll("#scenarios button").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+    setScenario(btn.dataset.sc);
+    if (UI.asleep || UI.backlightOff) wake();
+    relayout();
+  });
+
+  document.getElementById("states").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button");
+    if (!btn) return;
+    if (UI.asleep || UI.backlightOff) wake();
+    const to = btn.dataset.st;
+    UI.dimmerOpen = to === "dim";
+    UI.logExpanded = to === "log";
+    UI.view = to === "trip" ? "trip" : "live";
+    relayout();
+  });
+
+  const playBtn = document.getElementById("playpause");
+  let running = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  playBtn.textContent = running ? "Pause" : "Play";
+  playBtn.setAttribute("aria-pressed", String(running));
+  playBtn.addEventListener("click", () => {
+    running = !running;
+    playBtn.textContent = running ? "Pause" : "Play";
+    playBtn.setAttribute("aria-pressed", String(running));
+  });
+
+  /* =====================================================================
+     Fit — the panel is laid out at native 1280x720 and scaled to whatever
+     width the stage has, so every coordinate above stays in device pixels.
+     ===================================================================== */
+  function fit() {
+    screen.style.transform = `scale(${stage.clientWidth / W})`;
+  }
+  fit();
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(stage);
+  else window.addEventListener("resize", fit);
+
+  /* =====================================================================
+     Clocks: GPS at 1 Hz, sentence drain + render poll at 200 ms
+     ===================================================================== */
+  setScenario("drive");
+  // Prime the log so the card isn't empty on arrival.
+  emitSentences();
+  for (let i = 0; i < 20; i++) drainPending();
+  SIM.hdopHistory = Array.from({ length: 24 }, (_, i) => 3.4 - i * 0.1 + rnd(-0.15, 0.15));
+  relayout();
+
+  setInterval(() => {
+    if (!running || document.hidden) return;
+    stepGps(1000);
+  }, 1000);
+
+  setInterval(() => {
+    if (running && !document.hidden) drainPending();
+    renderTick(false);
+  }, 200);
+</script>

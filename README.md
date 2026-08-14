@@ -26,5 +26,14 @@ python3 -m pip install --user "click<8.2"
 
 ## Architecture
 
-- `src/gps_monitor.cpp` reads and parses NMEA sentences (via [TinyGPSPlus](https://github.com/mikalhart/TinyGPSPlus)) on a dedicated FreeRTOS task pinned to core 1, so serial ingestion never blocks display rendering.
-- `src/main.cpp` renders the latest GPS fix (via [M5Unified](https://github.com/M5Stack/M5Unified)) on a throttled ~5Hz UI loop.
+The firmware is a single translation unit, `src/main.cpp`.
+
+- **Ingestion** runs on its own FreeRTOS task, pinned to the core opposite the Arduino loop task, so a slow redraw can never stall draining the UART. Shared state is mutex-protected; the render side holds the lock only long enough to copy a snapshot, then draws unlocked.
+- **Parsing** uses [TinyGPSPlus](https://github.com/mikalhart/TinyGPSPlus) for the GGA/RMC-family fields (position, altitude, speed, course, date/time, HDOP). The per-satellite elevation/azimuth/SNR table (GSV) and the 2D/3D fix mode with PDOP/VDOP (GSA) are parsed directly off the raw sentence stream, since TinyGPSPlus exposes neither.
+- **Rendering** ([M5Unified](https://github.com/M5Stack/M5Unified) / M5GFX) targets a full-screen 16-bit PSRAM canvas sprite. Every 200 ms the loop hashes each panel's inputs and repaints only the panels whose signature changed, pushing at most four dirty rects — so the panels update at whatever rate their own data does.
+- **Touch** drives a position/trip toggle, per-satellite detail in the sky plot, an expandable NMEA log with a sentence-type filter, a brightness overlay and a sleep state. Hit testing runs on release, with edge detection done by hand — this digitiser emits a ghost second contact.
+- **Outputs** beyond the screen: raw NMEA and decoded track points to SD, and the sentence stream served to up to four clients over a Wi-Fi AP (`Tab5-GPS`) on TCP port 10110. Both keep running while the screen is off. Set `ENABLE_WIFI_NMEA` to 0 to build without the radio.
+
+## UI reference
+
+[`docs/index.html`](docs/index.html) is a browser mockup of the panel: a simulated receiver drives the real layout arithmetic, palette, sort order and hit radii, and the touch targets behave as they do on hardware. It doubles as the reference for the layout metrics, the rgb565 palette and the touch map.
