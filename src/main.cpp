@@ -599,6 +599,7 @@ static void gpsTaskFn(void *) {
   int lineLen = 0;
   uint32_t taskStartMs = millis();
   uint32_t lastWarnMs = 0;
+  uint32_t lastFixEpoch = 0;
 
   for (;;) {
     if (GPSSerial.available()) {
@@ -623,7 +624,22 @@ static void gpsTaskFn(void *) {
       }
       pruneStaleSats();
 
-      if (gps.location.isValid()) {
+      // One epoch = one receiver fix. This block used to run once per drain
+      // burst instead, and a burst is not a fix: the task wakes every 2ms, so
+      // a second's worth of sentences arriving over ~50ms produces on the
+      // order of 25 bursts. That meant ~25 track rows and ~25 SD flushes a
+      // second rather than the one the CSV is meant to hold, and an HDOP
+      // history spanning under two seconds rather than the last 40 fixes.
+      //
+      // The epoch key is the receiver's own UTC stamp, not TinyGPSPlus's
+      // isUpdated(): reading a value clears that flag, and captureSnapshot()
+      // reads every one of them from the render task five times a second, so
+      // the update flags are not reliably observable from here.
+      uint32_t epoch = gps.time.isValid() ? gps.time.value() : (millis() / 1000);
+      bool newEpoch = epoch != lastFixEpoch;
+      if (newEpoch) lastFixEpoch = epoch;
+
+      if (newEpoch && gps.location.isValid()) {
         double lat = gps.location.lat(), lon = gps.location.lng();
         if (haveLastFix) {
           double d = haversineKm(lastFixLat, lastFixLon, lat, lon);
@@ -644,13 +660,16 @@ static void gpsTaskFn(void *) {
                    gps.speed.isValid() ? gps.speed.kmph() : 0.0, gps.course.isValid() ? gps.course.deg() : 0.0,
                    gps.hdop.isValid() ? gps.hdop.hdop() : 0.0, gps.satellites.isValid() ? gps.satellites.value() : 0);
           trackLogFile.print(row);
-          trackLogFile.flush(); // one row/sec at most -- safe to flush every write
+          trackLogFile.flush(); // genuinely one row per fix now -- safe to flush every write
         }
       }
-      if (gps.speed.isValid() && gps.speed.kmph() > maxSpeedKmph) maxSpeedKmph = gps.speed.kmph();
-      if (gps.hdop.isValid()) pushHdopHistory((float)gps.hdop.hdop());
-
-      if (updated) printFix();
+      if (newEpoch) {
+        if (gps.speed.isValid() && gps.speed.kmph() > maxSpeedKmph) maxSpeedKmph = gps.speed.kmph();
+        if (gps.hdop.isValid()) pushHdopHistory((float)gps.hdop.hdop());
+        // Also once per fix rather than once per parsed sentence: this is a
+        // dozen blocking Serial writes, and it runs holding stateMutex.
+        if (updated) printFix();
+      }
       xSemaphoreGive(stateMutex);
     }
 
