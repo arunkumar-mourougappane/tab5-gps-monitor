@@ -36,6 +36,8 @@
 #include <lgfx/v1/platforms/esp32p4/Panel_DSI.hpp>
 #include <TinyGPSPlus.h>
 #include <math.h>
+#include <string.h>
+#include <stdlib.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
@@ -394,45 +396,51 @@ static void wifiTaskFn(void *) {
 // ------------------------------------------------------- NMEA line parsing --
 // All of this only ever runs inside gpsTask, holding stateMutex.
 
-static int splitCSV(const String &s, String out[], int maxTokens) {
-  int count = 0, start = 0;
+// Splits in place: each comma becomes a NUL and `out` points into `s`, so a
+// sentence costs no allocations at all. The previous String-based version
+// heap-allocated one substring per field -- up to 24 per sentence, ~50
+// sentences a second, every one of them inside stateMutex.
+static int splitCSV(char *s, char *out[], int maxTokens) {
+  int count = 0;
+  char *p = s;
   while (count < maxTokens) {
-    int comma = s.indexOf(',', start);
-    if (comma < 0) {
-      out[count++] = s.substring(start);
-      break;
-    }
-    out[count++] = s.substring(start, comma);
-    start = comma + 1;
+    out[count++] = p;
+    char *comma = strchr(p, ',');
+    if (comma == nullptr) break;
+    *comma = '\0';
+    p = comma + 1;
   }
   return count;
 }
 
-static void parseGSV(const String &talker, String tokens[], int n) {
+static void parseGSV(const char *talker, char *tokens[], int n) {
   // $xxGSV,numMsgs,msgNum,numSatsInView,[prn,elev,az,snr]x4...*CS
   int idx = 4;
   while (idx + 3 < n) {
-    if (tokens[idx].length() > 0) {
-      int prn = tokens[idx].toInt();
-      int elev = tokens[idx + 1].length() ? tokens[idx + 1].toInt() : -1;
-      int az = tokens[idx + 2].length() ? tokens[idx + 2].toInt() : -1;
-      int snr = tokens[idx + 3].length() ? tokens[idx + 3].toInt() : -1;
-      upsertSat(talker.c_str(), prn, elev, az, snr);
+    if (tokens[idx][0] != '\0') {
+      int prn = atoi(tokens[idx]);
+      int elev = tokens[idx + 1][0] ? atoi(tokens[idx + 1]) : -1;
+      int az = tokens[idx + 2][0] ? atoi(tokens[idx + 2]) : -1;
+      int snr = tokens[idx + 3][0] ? atoi(tokens[idx + 3]) : -1;
+      upsertSat(talker, prn, elev, az, snr);
     }
     idx += 4;
   }
 }
 
-static void parseGSA(String tokens[], int n) {
+static void parseGSA(char *tokens[], int n) {
   // $xxGSA,mode,fixType,prn1..prn12,PDOP,HDOP,VDOP*CS
   if (n < 18) return;
-  gsaFixType = tokens[2].length() ? tokens[2].toInt() : 1;
-  gsaPDOP = tokens[15].toFloat();
-  gsaVDOP = tokens[17].toFloat();
+  gsaFixType = tokens[2][0] ? atoi(tokens[2]) : 1;
+  gsaPDOP = atof(tokens[15]);
+  gsaVDOP = atof(tokens[17]);
 }
 
 static constexpr int LOG_LINES = 40;
-static String rawLog[LOG_LINES];
+// Longest legal NMEA sentence is 82 bytes including CRLF; the assembler caps a
+// line at 100 like the String version did, so 104 leaves room for the NUL.
+static constexpr int RAW_LINE_MAX = 104;
+static char rawLog[LOG_LINES][RAW_LINE_MAX];
 static uint32_t rawLogHead = 0;
 static uint32_t lastSentenceMs = 0;
 
@@ -459,10 +467,10 @@ static const char *nmeaFilterLabel() {
   }
 }
 
-static bool sentencePassesFilter(const String &type) {
+static bool sentencePassesFilter(const char *type) {
   switch ((NmeaFilter)nmeaFilter) {
-    case NmeaFilter::NO_GSV: return type != "GSV";
-    case NmeaFilter::POSITION: return type == "GGA" || type == "RMC";
+    case NmeaFilter::NO_GSV: return strcmp(type, "GSV") != 0;
+    case NmeaFilter::POSITION: return strcmp(type, "GGA") == 0 || strcmp(type, "RMC") == 0;
     default: return true;
   }
 }
@@ -477,7 +485,7 @@ static Rect nmeaFilterChipRect() {
           FILTER_CHIP_W, FILTER_CHIP_H};
 }
 
-static void handleRawSentence(const String &line) {
+static void handleRawSentence(const char *line, int len) {
   lastSentenceMs = millis();
 
   if (sdReady) {
@@ -492,25 +500,35 @@ static void handleRawSentence(const String &line) {
 #if ENABLE_WIFI_NMEA
   if (nmeaQueue) {
     NmeaQueueMsg msg;
-    strlcpy(msg.text, line.c_str(), sizeof(msg.text));
+    strlcpy(msg.text, line, sizeof(msg.text));
     xQueueSend(nmeaQueue, &msg, 0); // non-blocking: drop rather than ever stall gpsTask
   }
 #endif
 
-  int star = line.indexOf('*');
-  String core = star >= 0 ? line.substring(0, star) : line;
-  bool wellFormed = core.length() >= 6 && core[0] == '$';
+  // The body up to '*' is what gets tokenised. Copied rather than tokenised in
+  // place because splitCSV() writes NULs over the commas, and the caller's
+  // buffer has already been handed to SD and the TCP queue as one string.
+  char core[RAW_LINE_MAX];
+  int coreLen = len;
+  const char *star = strchr(line, '*');
+  if (star != nullptr) coreLen = (int)(star - line);
+  if (coreLen >= RAW_LINE_MAX) coreLen = RAW_LINE_MAX - 1;
+  memcpy(core, line, coreLen);
+  core[coreLen] = '\0';
 
-  String talker, type;
+  bool wellFormed = coreLen >= 6 && core[0] == '$';
+
+  char talker[3] = {0};
+  char type[4] = {0};
   if (wellFormed) {
-    talker = core.substring(1, 3);
-    type = core.substring(3, 6);
+    memcpy(talker, core + 1, 2);
+    memcpy(type, core + 3, 3);
 
     // Counted before filtering: these stay a record of what the receiver
     // actually emits, not of what the log happens to be showing.
     bool matched = false;
     for (int i = 0; i < NUM_SENTENCE_TYPES - 1; i++) {
-      if (type == SENTENCE_TYPES[i]) {
+      if (strcmp(type, SENTENCE_TYPES[i]) == 0) {
         sentenceTypeCounts[i]++;
         matched = true;
         break;
@@ -524,7 +542,7 @@ static void handleRawSentence(const String &line) {
   // sentences that survive within the last LOG_LINES of GSV-dominated traffic.
   // Malformed lines are always kept -- they're the interesting ones.
   if (!wellFormed || sentencePassesFilter(type)) {
-    rawLog[rawLogHead % LOG_LINES] = line;
+    strlcpy(rawLog[rawLogHead % LOG_LINES], line, RAW_LINE_MAX);
     rawLogHead++;
   }
 
@@ -532,12 +550,12 @@ static void handleRawSentence(const String &line) {
 
   // Parsing is deliberately outside the filter: the sky plot and fix mode must
   // keep updating no matter what the log view is set to show.
-  String tokens[24];
+  char *tokens[24];
   int n = splitCSV(core, tokens, 24);
 
-  if (type == "GSV") {
+  if (strcmp(type, "GSV") == 0) {
     parseGSV(talker, tokens, n);
-  } else if (type == "GSA") {
+  } else if (strcmp(type, "GSA") == 0) {
     parseGSA(tokens, n);
   }
 }
@@ -577,7 +595,8 @@ static void printFix() {
 static SemaphoreHandle_t stateMutex;
 
 static void gpsTaskFn(void *) {
-  String lineBuf;
+  char lineBuf[RAW_LINE_MAX];
+  int lineLen = 0;
   uint32_t taskStartMs = millis();
   uint32_t lastWarnMs = 0;
 
@@ -590,12 +609,16 @@ static void gpsTaskFn(void *) {
         if (gps.encode(c)) updated = true;
 
         if (c == '$') {
-          lineBuf = "$";
+          lineBuf[0] = '$';
+          lineLen = 1;
         } else if (c == '\n') {
-          if (lineBuf.length() > 6) handleRawSentence(lineBuf);
-          lineBuf = "";
-        } else if (c != '\r' && lineBuf.length() > 0 && lineBuf.length() < 100) {
-          lineBuf += c;
+          if (lineLen > 6) {
+            lineBuf[lineLen] = '\0';
+            handleRawSentence(lineBuf, lineLen);
+          }
+          lineLen = 0;
+        } else if (c != '\r' && lineLen > 0 && lineLen < RAW_LINE_MAX - 4) {
+          lineBuf[lineLen++] = c;
         }
       }
       pruneStaleSats();
@@ -673,7 +696,7 @@ struct RenderSnapshot {
 
   SatInfo sats[MAX_SATS];
 
-  String logLines[LOG_LINES];
+  char logLines[LOG_LINES][RAW_LINE_MAX];
   uint32_t logHead;
   uint32_t lastSentenceMs;
   uint32_t typeCounts[NUM_SENTENCE_TYPES];
@@ -717,7 +740,7 @@ static void captureSnapshot(RenderSnapshot &s) {
   memcpy(s.sats, satTable, sizeof(satTable)); // POD: no per-element String copies
   s.visibleSats = countVisibleSats(s.sats);
 
-  for (int i = 0; i < LOG_LINES; i++) s.logLines[i] = rawLog[i];
+  memcpy(s.logLines, rawLog, sizeof(rawLog)); // one blockcopy, no per-line allocation
   s.logHead = rawLogHead;
   s.lastSentenceMs = lastSentenceMs;
   memcpy(s.typeCounts, sentenceTypeCounts, sizeof(sentenceTypeCounts));
@@ -1915,7 +1938,7 @@ void loop() {
           xSemaphoreTake(stateMutex, portMAX_DELAY);
           nmeaFilter = (nmeaFilter + 1) % NMEA_FILTER_COUNT;
           rawLogHead = 0;
-          for (auto &l : rawLog) l = "";
+          for (auto &l : rawLog) l[0] = '\0';
           xSemaphoreGive(stateMutex);
           relayout();
           wantFix = wantSat = wantLog = true;
