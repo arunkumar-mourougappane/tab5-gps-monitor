@@ -485,9 +485,11 @@ static Rect nmeaFilterChipRect() {
           FILTER_CHIP_W, FILTER_CHIP_H};
 }
 
-static void handleRawSentence(const char *line, int len) {
-  lastSentenceMs = millis();
-
+// The two sinks that only gpsTask ever touches: the SD log and the TCP fan-out
+// queue. Split out of handleRawSentence() so the caller can run them without
+// holding stateMutex -- an SD write is the slowest thing in the ingest path,
+// and nothing on the render side can see either sink.
+static void logSentence(const char *line) {
   if (sdReady) {
     nmeaLogFile.print(line);
     nmeaLogFile.print("\n");
@@ -504,6 +506,12 @@ static void handleRawSentence(const char *line, int len) {
     xQueueSend(nmeaQueue, &msg, 0); // non-blocking: drop rather than ever stall gpsTask
   }
 #endif
+}
+
+// Everything here touches state the render task reads, so it runs under
+// stateMutex -- and now nothing else does.
+static void handleRawSentence(const char *line, int len) {
+  lastSentenceMs = millis();
 
   // The body up to '*' is what gets tokenised. Copied rather than tokenised in
   // place because splitCSV() writes NULs over the commas, and the caller's
@@ -560,34 +568,22 @@ static void handleRawSentence(const char *line, int len) {
   }
 }
 
-static void printFix() {
-  Serial.print("fix=");
-  Serial.print(gps.location.isValid());
-  Serial.print(" sats=");
-  Serial.print(gps.satellites.isValid() ? gps.satellites.value() : 0);
+// Formats rather than prints: the caller holds stateMutex while filling the
+// buffer (every field below is shared state) and writes it to the port after
+// releasing, so a blocked USB CDC endpoint can't stall UART draining.
+static void formatFix(char *out, size_t cap) {
+  int n = snprintf(out, cap, "fix=%d sats=%d", (int)gps.location.isValid(),
+                   gps.satellites.isValid() ? (int)gps.satellites.value() : 0);
 
-  if (gps.location.isValid()) {
-    Serial.print(" lat=");
-    Serial.print(gps.location.lat(), 6);
-    Serial.print(" lon=");
-    Serial.print(gps.location.lng(), 6);
-  }
-  if (gps.altitude.isValid()) {
-    Serial.print(" alt=");
-    Serial.print(gps.altitude.meters(), 1);
-    Serial.print("m");
-  }
-  if (gps.speed.isValid()) {
-    Serial.print(" speed=");
-    Serial.print(gps.speed.kmph(), 1);
-    Serial.print("km/h");
-  }
-  if (gps.date.isValid() && gps.time.isValid()) {
-    Serial.printf(" utc=%04d-%02d-%02d %02d:%02d:%02d", gps.date.year(),
-                   gps.date.month(), gps.date.day(), gps.time.hour(),
-                   gps.time.minute(), gps.time.second());
-  }
-  Serial.println();
+  if (gps.location.isValid())
+    n += snprintf(out + n, cap - n, " lat=%.6f lon=%.6f", gps.location.lat(), gps.location.lng());
+  if (gps.altitude.isValid())
+    n += snprintf(out + n, cap - n, " alt=%.1fm", gps.altitude.meters());
+  if (gps.speed.isValid())
+    n += snprintf(out + n, cap - n, " speed=%.1fkm/h", gps.speed.kmph());
+  if (gps.date.isValid() && gps.time.isValid())
+    snprintf(out + n, cap - n, " utc=%04d-%02d-%02d %02d:%02d:%02d", gps.date.year(), gps.date.month(),
+             gps.date.day(), gps.time.hour(), gps.time.minute(), gps.time.second());
 }
 
 // -------------------------------------------------------------- GPS task --
@@ -603,11 +599,13 @@ static void gpsTaskFn(void *) {
 
   for (;;) {
     if (GPSSerial.available()) {
-      xSemaphoreTake(stateMutex, portMAX_DELAY);
       bool updated = false;
+      // Reading the port and assembling a line need no lock -- the UART and
+      // lineBuf belong to this task. The lock is taken per completed sentence
+      // instead of once around the whole drain, so the render task can
+      // interleave between sentences rather than waiting out a full burst.
       while (GPSSerial.available()) {
         char c = GPSSerial.read();
-        if (gps.encode(c)) updated = true;
 
         if (c == '$') {
           lineBuf[0] = '$';
@@ -615,13 +613,31 @@ static void gpsTaskFn(void *) {
         } else if (c == '\n') {
           if (lineLen > 6) {
             lineBuf[lineLen] = '\0';
+            logSentence(lineBuf); // SD + TCP queue: gpsTask-only, so no lock
+
+            xSemaphoreTake(stateMutex, portMAX_DELAY);
+            // Feeding TinyGPSPlus the assembled sentence rather than the raw
+            // byte stream: bytes outside a sentence carry no information it
+            // can use, and a line long enough to have been truncated by the
+            // assembler would fail its checksum either way.
+            for (int k = 0; k < lineLen; k++) {
+              if (gps.encode(lineBuf[k])) updated = true;
+            }
+            if (gps.encode('\r')) updated = true;
+            if (gps.encode('\n')) updated = true;
             handleRawSentence(lineBuf, lineLen);
+            xSemaphoreGive(stateMutex);
           }
           lineLen = 0;
         } else if (c != '\r' && lineLen > 0 && lineLen < RAW_LINE_MAX - 4) {
           lineBuf[lineLen++] = c;
         }
       }
+
+      char trackRow[128] = {0};
+      char fixLine[192] = {0};
+
+      xSemaphoreTake(stateMutex, portMAX_DELAY);
       pruneStaleSats();
 
       // One epoch = one receiver fix. This block used to run once per drain
@@ -652,25 +668,31 @@ static void gpsTaskFn(void *) {
         lastFixLat = lat;
         lastFixLon = lon;
 
+        // Formatted here (every field is shared state), written after the
+        // release below.
         if (sdReady) {
-          char row[128];
-          snprintf(row, sizeof(row), "%04d-%02d-%02dT%02d:%02d:%02dZ,%.6f,%.6f,%.1f,%.1f,%.1f,%.1f,%d\n",
+          snprintf(trackRow, sizeof(trackRow), "%04d-%02d-%02dT%02d:%02d:%02dZ,%.6f,%.6f,%.1f,%.1f,%.1f,%.1f,%d\n",
                    gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour(), gps.time.minute(),
                    gps.time.second(), lat, lon, gps.altitude.isValid() ? gps.altitude.meters() : 0.0,
                    gps.speed.isValid() ? gps.speed.kmph() : 0.0, gps.course.isValid() ? gps.course.deg() : 0.0,
                    gps.hdop.isValid() ? gps.hdop.hdop() : 0.0, gps.satellites.isValid() ? gps.satellites.value() : 0);
-          trackLogFile.print(row);
-          trackLogFile.flush(); // genuinely one row per fix now -- safe to flush every write
         }
       }
       if (newEpoch) {
         if (gps.speed.isValid() && gps.speed.kmph() > maxSpeedKmph) maxSpeedKmph = gps.speed.kmph();
         if (gps.hdop.isValid()) pushHdopHistory((float)gps.hdop.hdop());
-        // Also once per fix rather than once per parsed sentence: this is a
-        // dozen blocking Serial writes, and it runs holding stateMutex.
-        if (updated) printFix();
+        // Also once per fix rather than once per parsed sentence.
+        if (updated) formatFix(fixLine, sizeof(fixLine));
       }
       xSemaphoreGive(stateMutex);
+
+      // Both of these are slow, and neither is shared -- so they happen with
+      // the lock already released.
+      if (trackRow[0] != '\0') {
+        trackLogFile.print(trackRow);
+        trackLogFile.flush(); // one row per fix -- safe to flush every write
+      }
+      if (fixLine[0] != '\0') Serial.println(fixLine);
     }
 
     uint32_t now = millis();
