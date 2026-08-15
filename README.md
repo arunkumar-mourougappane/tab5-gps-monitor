@@ -1,4 +1,11 @@
 # tab5-gps-monitor
+
+[![PlatformIO CI](https://github.com/arunkumar-mourougappane/tab5-gps-monitor/actions/workflows/build.yml/badge.svg)](https://github.com/arunkumar-mourougappane/tab5-gps-monitor/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/arunkumar-mourougappane/tab5-gps-monitor?include_prereleases&sort=semver)](https://github.com/arunkumar-mourougappane/tab5-gps-monitor/releases)
+[![License](https://img.shields.io/github/license/arunkumar-mourougappane/tab5-gps-monitor)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-ESP32--P4-blue)](https://docs.m5stack.com/en/core/Tab5)
+[![Framework](https://img.shields.io/badge/framework-Arduino-00979D)](https://github.com/pioarduino/platform-espressif32)
+
 A esp32-p4 (Tab5) application to integrate m5stack GPS/BDS Unit with SMA Antenna to demonstrate GPS Monitor
 
 ## Hardware
