@@ -43,29 +43,17 @@
 #include <freertos/semphr.h>
 #include <freertos/queue.h>
 #include <SD_MMC.h>
+#include "config.h"
+#include "display.h"
 
-// ESP32-P4+C6 WiFi (ESP-Hosted transport) is a newer code path; pioarduino's
-// Tab5 board JSON is pinned to "esp32p4_es" (engineering-sample) silicon, and
-// a documented Arduino-core issue around P4 chip-revision handling (fixed
-// upstream after this platform version was cut) has caused boot crashes tied
-// to hosted WiFi init on some physical units. If the board won't boot after
-// flashing, flip this to 0 first to isolate whether WiFi is the cause.
-#define ENABLE_WIFI_NMEA 1
 #if ENABLE_WIFI_NMEA
 #include <WiFi.h>
 #endif
 
-static constexpr int GPS_RX_PIN = 54; // Tab5 RX <- GPS TX (White)
-static constexpr int GPS_TX_PIN = 53; // Tab5 TX -> GPS RX (Yellow)
-static constexpr uint32_t GPS_BAUD = 115200; // GPS/BDS Unit v1.1 default
-
 HardwareSerial GPSSerial(1);
 TinyGPSPlus gps;
 
-// Off-screen frame buffer: every draw* function renders into this (in PSRAM)
-// instead of the physical panel, and loop() blits the finished frame in one
-// pushSprite() call. Without this, each fillRect-then-redraw step is visible
-// on the panel as a blank flash before the new content lands.
+// Definition matching the extern in display.h.
 M5Canvas canvas(&M5.Display);
 
 // Pre-rendered sky-plot background (rings + N/S/E/W labels): built once in
@@ -75,69 +63,8 @@ M5Canvas canvas(&M5.Display);
 M5Canvas radarBg(&canvas);
 static int radarBgSize = 0;
 
-// ---------------------------------------------------------------- palette --
-
-constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
-  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-}
-
-static constexpr uint16_t COLOR_BG = rgb565(9, 11, 17);          // page background
-static constexpr uint16_t COLOR_TOPBAR_BG = rgb565(16, 18, 27);  // top bar / badges
-static constexpr uint16_t COLOR_CARD_BG = rgb565(21, 24, 35);    // card surface
-static constexpr uint16_t COLOR_DIVIDER = rgb565(45, 50, 66);    // hairlines / grid rings
-static constexpr uint16_t COLOR_TEXT_PRIMARY = rgb565(236, 239, 245);
-static constexpr uint16_t COLOR_TEXT_SECONDARY = rgb565(138, 146, 166);
-static constexpr uint16_t COLOR_ACCENT = rgb565(88, 168, 232);   // position card accent
-static constexpr uint16_t COLOR_ACCENT_GREEN = rgb565(96, 210, 150); // log card accent
-static constexpr uint16_t COLOR_STATUS_GOOD = rgb565(84, 214, 140);
-static constexpr uint16_t COLOR_STATUS_WARN = rgb565(232, 188, 74);
-static constexpr uint16_t COLOR_STATUS_BAD = rgb565(232, 92, 92);
-static constexpr uint16_t COLOR_STATUS_NONE = rgb565(90, 96, 112);
-
-// ----------------------------------------------------------------- layout --
-
-struct Rect { int x, y, w, h; };
-
-static int SCREEN_W = 1280;
-static int SCREEN_H = 720;
-static constexpr int MARGIN = 16;
-static constexpr int CARD_RADIUS = 14;
-static constexpr int TOPBAR_H = 56;
-static constexpr int LOGCARD_H = 190;
-static constexpr int CARD_HEADER_H = 36;
-
-static Rect fixCard, skyCard, logCard;
-
-static Rect innerOf(const Rect &r) {
-  return {r.x + 18, r.y + CARD_HEADER_H + 8, r.w - 36, r.h - CARD_HEADER_H - 24};
-}
-
-static bool pointInRect(int px, int py, const Rect &r) {
-  return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
-}
-
-// ------------------------------------------------------------- sky plot --
-// The plot is a north-up polar projection with a fixed instrument bezel around
-// it: 10 degree minor ticks, 30 degree major ticks, cardinals, a white index at
-// north and the elevation rings labelled. All of that is static, so it lives in
-// the pre-rendered radarBg sprite and costs nothing per frame.
-//
-// The bezel is paid for out of the circle: the sprite can be at most the card
-// interior's height (366px), so the ring costs SKY_BEZEL_PAD of radius. Both
-// the sprite builder and drawSatPanel() derive their geometry from skyGeom() --
-// they used to compute it separately, and a bezel makes that divergence
-// visible rather than harmless.
-static constexpr int SKY_BEZEL_PAD = 35;
-
-struct SkyGeom { int radius, size, cx, cy; };
-
-static Rect innerOf(const Rect &r);
-
-static SkyGeom skyGeom(const Rect &skyInner) {
-  int radius = min(skyInner.h, (int)(skyInner.w * 0.46f)) / 2 - 25;
-  int size = (radius + SKY_BEZEL_PAD) * 2;
-  return {radius, size, skyInner.x + size / 2, skyInner.y + skyInner.h / 2};
-}
+#include "theme.h"
+#include "layout.h"
 
 // ------------------------------------------------------------ satellites --
 // satTable/gsaFixType/gsaPDOP/gsaVDOP are written only by gpsTask (under
@@ -854,7 +781,8 @@ static void captureSnapshot(RenderSnapshot &s) {
 
 enum class PositionView : uint8_t { LIVE, TRIP };
 static PositionView positionView = PositionView::LIVE;
-static bool logExpanded = false;
+// logExpanded is defined in layout.cpp (computeLayout() needs it); declared
+// via layout.h's extern.
 
 struct SkyDot { int x, y; SatInfo info; };
 static SkyDot skyDots[MAX_SATS];
@@ -1030,9 +958,9 @@ static void drawCardFrame(const Rect &r, const char *label, uint16_t accent) {
 // Header text doubles as the touch-affordance hint, and only needs to be
 // repainted when a view toggles -- so drawStaticChrome() is called again on
 // every touch transition rather than every render tick.
-static void drawFilterChip(); // defined below, with the other chip helpers
+void drawFilterChip(); // defined below; called from layout.cpp's relayout()
 
-static void drawStaticChrome() {
+void drawStaticChrome() { // called from layout.cpp's relayout()
   auto &d = canvas;
   d.fillScreen(COLOR_BG);
 
@@ -1241,7 +1169,7 @@ static void drawDimmer() {
 // Drawn from drawLogPanel() (per frame, so it can animate) as well as from
 // drawStaticChrome() (so it survives a relayout). Its fixed size means the
 // self-contained fill fully covers the previous state -- no clear needed.
-static void drawFilterChip() {
+void drawFilterChip() {
   bool filtering = (NmeaFilter)nmeaFilter != NmeaFilter::ALL;
   drawChip(nmeaFilterChipRect(), nmeaFilterLabel(), filtering ? COLOR_ACCENT_GREEN : COLOR_TOPBAR_BG,
            filtering ? COLOR_BG : COLOR_TEXT_SECONDARY, pressTarget == PressTarget::FILTER);
@@ -1991,39 +1919,7 @@ static void pushDirty(bool full) {
 }
 
 // ------------------------------------------------------------------ setup --
-
-static void computeLayout() {
-  int contentTop = TOPBAR_H + MARGIN;
-
-  if (logExpanded) {
-    logCard = {MARGIN, contentTop, SCREEN_W - 2 * MARGIN, SCREEN_H - contentTop - MARGIN};
-    fixCard = {0, 0, 0, 0};
-    skyCard = {0, 0, 0, 0};
-    return;
-  }
-
-  logCard = {MARGIN, SCREEN_H - MARGIN - LOGCARD_H, SCREEN_W - 2 * MARGIN, LOGCARD_H};
-  int row1Bottom = logCard.y - MARGIN;
-  int row1H = row1Bottom - contentTop;
-
-  int fixW = (int)((SCREEN_W - 3 * MARGIN) * 0.36f);
-  fixCard = {MARGIN, contentTop, fixW, row1H};
-  int skyX = MARGIN * 2 + fixW;
-  skyCard = {skyX, contentTop, SCREEN_W - skyX - MARGIN, row1H};
-}
-
-// Set whenever relayout() repaints the whole canvas, so the next frame pushes
-// full-screen instead of only the per-panel dirty rects.
-// Starts true so the first frame paints every panel and pushes full-screen,
-// rather than relying on initial signature values differing from zero.
-static bool relayoutPending = true;
-
-// Re-lays out and repaints chrome after a touch toggles view/expand state.
-static void relayout() {
-  computeLayout();
-  drawStaticChrome();
-  relayoutPending = true;
-}
+// computeLayout()/relayout() now live in layout.cpp.
 
 // ------------------------------------------------------------ power states --
 
