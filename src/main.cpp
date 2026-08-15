@@ -95,7 +95,7 @@ static Rect nmeaFilterHitRect() {
 // Only ever touched from loop() (render side) -- no locking needed.
 
 enum class PositionView : uint8_t { LIVE, TRIP };
-static PositionView positionView = PositionView::LIVE;
+PositionView positionView = PositionView::LIVE; // read by ui_chrome.cpp
 // logExpanded is defined in layout.cpp (computeLayout() needs it); declared
 // via layout.h's extern.
 
@@ -106,20 +106,12 @@ static int skyDotCount = 0;
 struct SatTooltip { bool active = false; SatInfo info; uint32_t shownAtMs = 0; };
 static SatTooltip satTooltip;
 
-// Screen-dark states. Both are woken by a tap anywhere; the difference is that
-// sleep also powers the radio down and puts the panel itself to sleep rather
-// than only zeroing the backlight.
-//
-// Neither stops GPS ingestion or SD logging: for a logger, "screen off" means
-// keep recording in your pocket, not stop working.
-static bool backlightOff = false;
-static bool asleep = false;
-static uint8_t savedBrightness = 128;
+#include "power.h" // backlightOff, asleep, savedBrightness, enter*/wakeDisplay
 
 // Which chip the finger is currently down on, so it can render pressed. Held
 // across frames (not just on release) so the highlight tracks the finger.
 enum class PressTarget : uint8_t { NONE, LIGHT, SLEEP, FILTER, DIM_OFF, DIM_DONE };
-static PressTarget pressTarget = PressTarget::NONE;
+PressTarget pressTarget = PressTarget::NONE; // read by ui_status_bar.cpp, ui_dimmer.cpp
 
 // Which chip the press *started* on. A button fires on release of the press
 // that began inside it, rather than on a fresh hit test of the lift position:
@@ -177,12 +169,7 @@ static void sampleTouch() {
   }
 }
 
-// Brightness overlay, opened from the LIGHT chip.
-static bool dimmerOpen = false;
-static bool dimmerDirty = false;
-static bool dimmerDragging = false; // slider grabbed, follows X until the lift
-static constexpr uint8_t BRIGHTNESS_MIN = 8; // slider floor: never fully dark
-static constexpr uint8_t BRIGHTNESS_MAX = 255;
+#include "ui_dimmer.h" // dimmerOpen/Dirty/Dragging, BRIGHTNESS_MIN/MAX, dimmer draw/geometry
 
 // Finger-sized hit target. The dots are drawn at only 4-9px radius, but a
 // fingertip covers ~40px on this panel -- matching the visual size made them
@@ -209,277 +196,13 @@ static int hitTestSkyDot(int px, int py) {
   return best;
 }
 
-// ------------------------------------------------------------- rendering --
+#include "ui_widgets.h"   // drawHeroValue/MiniStat/Badge/CardFrame/Chip/Sparkline
+#include "ui_chrome.h"    // drawStaticChrome()
+#include "ui_status_bar.h" // badge geometry, LIGHT/SLEEP rects, drawStatusPill()
 
-// Draws label above value, auto-shrinking the value if it would overflow `w`.
-// Returns the y position just below the drawn value.
-static int drawHeroValue(int x, int y, int w, const char *label, const char *value, uint8_t bigSize = 2) {
-  auto &d = canvas;
-  d.setFont(&fonts::Font2);
-  d.setTextSize(1);
-  d.setTextColor(COLOR_TEXT_SECONDARY, COLOR_CARD_BG);
-  d.setCursor(x, y);
-  d.print(label);
-  y += d.fontHeight() + 4;
 
-  d.setFont(&fonts::Font4);
-  d.setTextColor(COLOR_TEXT_PRIMARY, COLOR_CARD_BG);
-  d.setTextSize(bigSize);
-  if (d.textWidth(value) > w) d.setTextSize(1);
-  d.setCursor(x, y);
-  d.print(value);
-  y += d.fontHeight() + 2;
-  return y;
-}
-
-static void drawMiniStat(int x, int y, const char *label, const char *value) {
-  auto &d = canvas;
-  d.setFont(&fonts::Font2);
-  d.setTextSize(1);
-  d.setTextColor(COLOR_TEXT_SECONDARY, COLOR_CARD_BG);
-  d.setCursor(x, y);
-  d.print(label);
-  d.setFont(&fonts::Font4);
-  d.setTextColor(COLOR_TEXT_PRIMARY, COLOR_CARD_BG);
-  d.setCursor(x, y + 20);
-  d.print(value);
-}
-
-// Rounded pill with a leading text (no dot) -- used for fix/sat count badges.
-static int drawBadge(int x, int y, const char *text, uint16_t bg, uint16_t fg) {
-  auto &d = canvas;
-  d.setFont(&fonts::Font2);
-  d.setTextSize(1);
-  int h = 30;
-  int w = d.textWidth(text) + 28;
-  d.fillRoundRect(x, y, w, h, h / 2, bg);
-  d.setTextColor(fg, bg);
-  d.setCursor(x + 14, y + (h - d.fontHeight()) / 2);
-  d.print(text);
-  return w;
-}
-
-static void drawCardFrame(const Rect &r, const char *label, uint16_t accent) {
-  auto &d = canvas;
-  d.fillRoundRect(r.x, r.y, r.w, r.h, CARD_RADIUS, COLOR_CARD_BG);
-  d.setFont(&fonts::Font2);
-  d.setTextSize(1);
-  d.setTextColor(COLOR_TEXT_SECONDARY, COLOR_CARD_BG);
-  d.setCursor(r.x + 18, r.y + 11);
-  d.print(label);
-  d.drawFastHLine(r.x + 18, r.y + CARD_HEADER_H, r.w - 36, accent);
-}
-
-// Header text doubles as the touch-affordance hint, and only needs to be
-// repainted when a view toggles -- so drawStaticChrome() is called again on
-// every touch transition rather than every render tick.
-void drawFilterChip(); // defined below; called from layout.cpp's relayout()
-
-void drawStaticChrome() { // called from layout.cpp's relayout()
-  auto &d = canvas;
-  d.fillScreen(COLOR_BG);
-
-  d.fillRect(0, 0, SCREEN_W, TOPBAR_H, COLOR_TOPBAR_BG);
-  d.drawFastHLine(0, TOPBAR_H, SCREEN_W, COLOR_DIVIDER);
-  d.setFont(&fonts::Font4);
-  d.setTextSize(1);
-  d.setTextColor(COLOR_TEXT_PRIMARY, COLOR_TOPBAR_BG);
-  d.setCursor(MARGIN, (TOPBAR_H - d.fontHeight()) / 2);
-  d.print("TAB5 GPS MONITOR");
-
-  if (!logExpanded) {
-    drawCardFrame(fixCard, positionView == PositionView::LIVE ? "POSITION  (tap: trip stats)" : "TRIP STATS  (tap: live)",
-                  COLOR_ACCENT);
-    drawCardFrame(skyCard, "SATELLITES  (tap a dot for detail)", COLOR_ACCENT);
-  }
-  drawCardFrame(logCard, logExpanded ? "NMEA STREAM  (tap to collapse)" : "NMEA STREAM  (tap to expand)",
-                COLOR_ACCENT_GREEN);
-
-  drawFilterChip(); // sits in the log card header, at its right end
-}
-
-// Shared top-bar badge geometry. Every pill is laid out as
-//   [PAD_L][icon][ICON_GAP][text][PAD_R]
-// and its width is always derived from the string that is actually drawn.
-// Keeping these in one place is deliberate: the battery badge previously
-// sized itself from "100%" while printing "100% CHG", so the label overran
-// the pill and collided with the badge to its right.
-//
-// Sized against two hard limits. Vertically the bar is TOPBAR_H (56px), so a
-// badge cannot exceed that minus breathing room at each edge; 36 leaves 10px
-// above and below. Horizontally the row is right-aligned and chains leftward,
-// and drawStatusPill() repaints the chips before the badges -- so a row long
-// enough to reach the SLEEP chip's right edge (518) would paint over it.
-//
-// This is a deliberate midpoint: the pills were 32px and briefly 42px, which
-// read as oversized on the panel.
-static constexpr int BADGE_H = 36;
-static constexpr int BADGE_PAD_L = 16;
-static constexpr int BADGE_PAD_R = 16;
-static constexpr int BADGE_ICON_GAP = 11;
-static constexpr int BADGE_GAP = 11; // spacing between adjacent badges
-static constexpr int BADGE_DOT_R = 6;
-// The classic font ramp has no size between Font2 (16px) and Font4 (26px) --
-// Font0 is 8px and the next step up is 26 -- so the badge text stays at Font2
-// while the pill around it grew. Getting an intermediate size means bringing
-// in a GFX face (FreeSans9pt7b, DejaVu18), which would put a second typeface
-// in a bar that is otherwise all Font2/Font4.
-//
-// Single knob for the whole top bar: the badges and the LIGHT/SLEEP chips
-// take their face from here. Everything else drawn through drawChip() keeps
-// its own default -- the NMEA filter chip is only 26px tall.
-#define BADGE_FONT (&fonts::Font2)
-
-// Action chips live on the LEFT of the top bar, at fixed positions clear of the
-// title. Deliberately not chained onto the right-hand badge row: those pills
-// resize with their labels, which would shift these buttons' hit rects around
-// under the user's finger.
-static constexpr int TOPBAR_CTRL_X = 300;
-static constexpr int TOPBAR_CTRL_W = 104;
-
-static Rect lightBtnRect() {
-  return {TOPBAR_CTRL_X, (TOPBAR_H - BADGE_H) / 2, TOPBAR_CTRL_W, BADGE_H};
-}
-
-static Rect sleepBtnRect() {
-  return {TOPBAR_CTRL_X + TOPBAR_CTRL_W + BADGE_GAP, (TOPBAR_H - BADGE_H) / 2, TOPBAR_CTRL_W, BADGE_H};
-}
-
-// Touch targets, deliberately larger than the chips drawn inside them. A
-// fingertip covers roughly 40px on this panel and these chips are 36 tall, so
-// aiming at one and landing a few pixels high or low was a miss. Nothing else
-// in the top bar is tappable, so both claim its full height; horizontally they
-// take 5px of the 11px gap each, which keeps them from overlapping each other.
-static Rect lightHitRect() {
-  Rect c = lightBtnRect();
-  return {c.x - 5, 0, c.w + 10, TOPBAR_H};
-}
-
-static Rect sleepHitRect() {
-  Rect c = sleepBtnRect();
-  return {c.x - 5, 0, c.w + 10, TOPBAR_H};
-}
-
-// Press feedback is a colour swap rather than an inset/shrink: an inset would
-// leave a ring of the previous fill behind unless the surrounding background
-// were also repainted, and that background differs per call site.
-static void drawChip(const Rect &c, const char *label, uint16_t bg, uint16_t fg, bool pressed,
-                     const lgfx::IFont *font = &fonts::Font2) {
-  auto &d = canvas;
-  uint16_t fill = pressed ? COLOR_ACCENT : bg;
-  uint16_t text = pressed ? COLOR_BG : fg;
-  d.fillRoundRect(c.x, c.y, c.w, c.h, c.h / 2, fill);
-  d.setFont(font);
-  d.setTextSize(1);
-  d.setTextColor(text, fill);
-  d.setCursor(c.x + (c.w - d.textWidth(label)) / 2, c.y + (c.h - d.fontHeight()) / 2);
-  d.print(label);
-}
-
-// ------------------------------------------------ panel brightness via DCS --
-// M5.Display.setBrightness() is a no-op on Tab5: Panel_Device::setBrightness()
-// forwards to a Light instance and Tab5's init path never attaches one, while
-// Panel_DSI/ST7123/ST7121 implement no brightness of their own and neither IO
-// expander carries a backlight pin. The one remaining route is the panel's own
-// DSI command channel: DCS 0x51 (set_display_brightness), which only takes
-// effect once 0x53 (write_control_display) has enabled the brightness block.
-//
-// write_params() is protected, so it's reached through a derived type that adds
-// no members and therefore shares the base layout -- the same reinterpret_cast
-// idiom M5GFX itself uses in getPanel(). The type is never instantiated.
-//
-// SPECULATIVE: this only works if the ST7121/ST7123 actually drives the
-// backlight. If the panel ignores 0x51 the level won't change, and only the
-// blank-to-black path will be visible. Verify on hardware before relying on it.
-struct DsiBrightnessAccess : public lgfx::Panel_DSI {
-  bool writeDcs(uint32_t cmd, const uint8_t *data, size_t len) { return write_params(cmd, data, len); }
-};
-
-static bool panelSetBrightness(uint8_t level) {
-  auto *p = M5.Display.getPanel();
-  if (p == nullptr) return false;
-  auto *acc = reinterpret_cast<DsiBrightnessAccess *>(p);
-  uint8_t ctrl = 0x2C; // BCTRL | DD | BL -- enable the brightness control block
-  acc->writeDcs(0x53, &ctrl, 1);
-  return acc->writeDcs(0x51, &level, 1);
-}
-
-// ---------------------------------------------------------- dimmer overlay --
-
-static Rect dimmerPanelRect() {
-  constexpr int w = 560, h = 210;
-  return {(SCREEN_W - w) / 2, (SCREEN_H - h) / 2, w, h};
-}
-
-static Rect dimmerTrackRect() {
-  Rect p = dimmerPanelRect();
-  return {p.x + 30, p.y + 82, p.w - 60, 26};
-}
-
-static Rect dimmerOffRect() {
-  Rect p = dimmerPanelRect();
-  return {p.x + 30, p.y + p.h - 62, 150, 44};
-}
-
-static Rect dimmerDoneRect() {
-  Rect p = dimmerPanelRect();
-  return {p.x + p.w - 30 - 150, p.y + p.h - 62, 150, 44};
-}
-
-// Grab area for the slider. The track is drawn 26px tall but the knob riding
-// on it is 34, and a horizontal drag never stays inside a 26px band -- so the
-// area that can start and hold a drag is padded well past both. It stops short
-// of OFF/DONE at y+148 and of the percentage readout above.
-static Rect dimmerTrackHitRect() {
-  Rect t = dimmerTrackRect();
-  return {t.x - 10, t.y - 18, t.w + 20, t.h + 36};
-}
-
-// True when the level actually moved, so a drag that hasn't crossed into the
-// next step doesn't repaint the overlay or re-issue the panel command.
-static bool setBrightnessFromTouch(int tx) {
-  Rect t = dimmerTrackRect();
-  int rel = constrain(tx - t.x, 0, t.w);
-  uint8_t level = (uint8_t)(BRIGHTNESS_MIN + (long)(BRIGHTNESS_MAX - BRIGHTNESS_MIN) * rel / t.w);
-  if (level == savedBrightness) return false;
-  savedBrightness = level;
-  M5.Display.setBrightness(savedBrightness); // no-op today; harmless if M5GFX gains a Light
-  panelSetBrightness(savedBrightness);
-  return true;
-}
-
-static void drawDimmer() {
-  auto &d = canvas;
-  Rect p = dimmerPanelRect();
-
-  d.fillRoundRect(p.x, p.y, p.w, p.h, CARD_RADIUS, COLOR_CARD_BG);
-  d.drawRoundRect(p.x, p.y, p.w, p.h, CARD_RADIUS, COLOR_ACCENT);
-
-  d.setFont(&fonts::Font2);
-  d.setTextSize(1);
-  d.setTextColor(COLOR_TEXT_SECONDARY, COLOR_CARD_BG);
-  d.setCursor(p.x + 30, p.y + 22);
-  d.print("BRIGHTNESS");
-
-  int pct = (savedBrightness - BRIGHTNESS_MIN) * 100 / (BRIGHTNESS_MAX - BRIGHTNESS_MIN);
-  char pctBuf[8];
-  snprintf(pctBuf, sizeof(pctBuf), "%d%%", pct);
-  d.setFont(&fonts::Font4);
-  d.setTextColor(COLOR_TEXT_PRIMARY, COLOR_CARD_BG);
-  d.setCursor(p.x + p.w - 30 - d.textWidth(pctBuf), p.y + 16);
-  d.print(pctBuf);
-
-  Rect t = dimmerTrackRect();
-  d.fillRoundRect(t.x, t.y, t.w, t.h, t.h / 2, COLOR_BG);
-  int fillW = max(t.h, t.w * pct / 100);
-  d.fillRoundRect(t.x, t.y, fillW, t.h, t.h / 2, COLOR_ACCENT);
-  // Knob, clamped so it stays fully inside the track at both extremes.
-  int knobX = constrain(t.x + fillW, t.x + t.h / 2, t.x + t.w - t.h / 2);
-  d.fillCircle(knobX, t.y + t.h / 2, t.h / 2 + 4, COLOR_TEXT_PRIMARY);
-
-  drawChip(dimmerOffRect(), "OFF", COLOR_TOPBAR_BG, COLOR_TEXT_PRIMARY, pressTarget == PressTarget::DIM_OFF);
-  drawChip(dimmerDoneRect(), "DONE", COLOR_TOPBAR_BG, COLOR_TEXT_PRIMARY, pressTarget == PressTarget::DIM_DONE);
-}
+#include "power.h"      // panelSetBrightness()
+#include "ui_dimmer.h"  // dimmer geometry, setBrightnessFromTouch(), drawDimmer()
 
 // Drawn from drawLogPanel() (per frame, so it can animate) as well as from
 // drawStaticChrome() (so it survives a relayout). Its fixed size means the
@@ -502,118 +225,7 @@ static PressTarget hitTestChips(int x, int y) {
   return PressTarget::NONE;
 }
 
-// Right-aligned "dot + label" pill, returning its left edge so callers can
-// chain the next badge leftward from it.
-static int drawDotBadge(int rightEdgeX, int py, const char *text, uint16_t dotColor) {
-  auto &d = canvas;
-  d.setFont(BADGE_FONT);
-  d.setTextSize(1);
 
-  int iconW = BADGE_DOT_R * 2;
-  int textX = BADGE_PAD_L + iconW + BADGE_ICON_GAP;
-  int pillW = textX + d.textWidth(text) + BADGE_PAD_R;
-  int px = rightEdgeX - pillW;
-
-  d.fillRoundRect(px, py, pillW, BADGE_H, BADGE_H / 2, COLOR_CARD_BG);
-  d.fillCircle(px + BADGE_PAD_L + BADGE_DOT_R, py + BADGE_H / 2, BADGE_DOT_R, dotColor);
-  d.setTextColor(COLOR_TEXT_PRIMARY, COLOR_CARD_BG);
-  d.setCursor(px + textX, py + (BADGE_H - d.fontHeight()) / 2);
-  d.print(text);
-  return px;
-}
-
-// M5.Power reads go over I2C to the PMIC. Both the status-bar signature and
-// the badge itself want them, and the signature is sampled every 200ms -- so
-// an uncached pair costs ten I2C round-trips a second for a value that moves
-// on the order of minutes. Refreshed at 1Hz and shared by both callers.
-static int32_t battLevel = -1; // 0-100, negative if unknown
-static bool battCharging = false;
-static uint32_t battReadMs = 0;
-
-static void refreshBattery() {
-  uint32_t now = millis();
-  if (battReadMs != 0 && now - battReadMs < 1000) return;
-  battReadMs = now;
-  battLevel = M5.Power.getBatteryLevel();
-  battCharging = M5.Power.isCharging() == m5::Power_Class::is_charging_t::is_charging;
-}
-
-static int drawBatteryBadge(int rightEdgeX, int py) {
-  auto &d = canvas;
-  refreshBattery();
-  int32_t level = battLevel;
-  bool charging = battCharging;
-
-  char text[16];
-  if (level >= 0) snprintf(text, sizeof(text), "%d%%%s", (int)level, charging ? " CHG" : "");
-  else snprintf(text, sizeof(text), "--%s", charging ? " CHG" : "");
-
-  d.setFont(BADGE_FONT);
-  d.setTextSize(1);
-
-  // Icon scaled with the pill.
-  constexpr int bw = 26, bh = 16, nubW = 4;
-  int iconW = bw + nubW;
-  int textX = BADGE_PAD_L + iconW + BADGE_ICON_GAP;
-  int pillW = textX + d.textWidth(text) + BADGE_PAD_R; // measured on the drawn string
-  int px = rightEdgeX - pillW;
-
-  uint16_t barColor = level < 0 ? COLOR_STATUS_NONE : level < 20 ? COLOR_STATUS_BAD : level < 40 ? COLOR_STATUS_WARN : COLOR_STATUS_GOOD;
-
-  d.fillRoundRect(px, py, pillW, BADGE_H, BADGE_H / 2, COLOR_CARD_BG);
-
-  int bx = px + BADGE_PAD_L, by = py + BADGE_H / 2 - bh / 2;
-  d.drawRoundRect(bx, by, bw, bh, 3, COLOR_TEXT_SECONDARY);
-  d.fillRect(bx + bw, by + 4, nubW, bh - 8, COLOR_TEXT_SECONDARY); // terminal nub
-  if (level >= 0) {
-    int fillW = max(2, (bw - 4) * constrain((int)level, 0, 100) / 100);
-    d.fillRoundRect(bx + 2, by + 2, fillW, bh - 4, 2, barColor);
-  }
-
-  d.setTextColor(COLOR_TEXT_PRIMARY, COLOR_CARD_BG);
-  d.setCursor(px + textX, py + (BADGE_H - d.fontHeight()) / 2);
-  d.print(text);
-  return px;
-}
-
-static void drawStatusPill(uint32_t snapLastSentenceMs) {
-  auto &d = canvas;
-
-  // Every badge here is right-aligned and chains leftward off the one before
-  // it, and each pill's width comes from its own label -- "100%" vs
-  // "100% CHG", "SD" vs "NO SD", "RECEIVING" vs "NO DATA", "100%" vs "99%".
-  // When any label changes width the whole row shifts, but each badge only
-  // repaints its own current footprint, leaving the previous pill's rounded
-  // cap and trailing glyphs behind. Unlike the cards, the top-bar background
-  // is painted only once (drawStaticChrome at setup), so nothing ever cleans
-  // those up. Wipe the strip first. The badge row is far narrower than half
-  // the screen, so clearing the right half stays well clear of the title.
-  d.fillRect(TOPBAR_CTRL_X, 0, SCREEN_W - TOPBAR_CTRL_X, TOPBAR_H, COLOR_TOPBAR_BG);
-
-  drawChip(lightBtnRect(), "LIGHT", COLOR_CARD_BG, COLOR_TEXT_SECONDARY, pressTarget == PressTarget::LIGHT,
-           BADGE_FONT);
-  drawChip(sleepBtnRect(), "SLEEP", COLOR_CARD_BG, COLOR_TEXT_SECONDARY, pressTarget == PressTarget::SLEEP,
-           BADGE_FONT);
-
-  bool haveData = snapLastSentenceMs != 0 && millis() - snapLastSentenceMs < 5000;
-  int py = (TOPBAR_H - BADGE_H) / 2;
-
-  // Right-aligned, each badge chaining leftward off the previous one's left edge.
-  int px = drawDotBadge(SCREEN_W - MARGIN, py, haveData ? "RECEIVING" : "NO DATA",
-                        haveData ? COLOR_STATUS_GOOD : COLOR_STATUS_BAD);
-  int bpx = drawBatteryBadge(px - BADGE_GAP, py);
-#if ENABLE_WIFI_NMEA
-  char apBuf[12];
-  snprintf(apBuf, sizeof(apBuf), "AP %d", nmeaClientCount);
-  bpx = drawDotBadge(bpx - BADGE_GAP, py, apBuf,
-                     nmeaClientCount > 0 ? COLOR_STATUS_GOOD : COLOR_TEXT_SECONDARY);
-#endif
-  drawDotBadge(bpx - BADGE_GAP, py, sdReady ? "SD" : "NO SD",
-               sdReady ? COLOR_STATUS_GOOD : COLOR_STATUS_NONE);
-}
-
-static void drawSparkline(int x, int y, int w, int h, const float *values, int count, uint32_t head,
-                          uint16_t color, float maxVal); // defined below, with the trip view
 
 // Medium-weight value+quality-badge / value+caption block, used for the
 // accuracy and time readouts -- a step down from the lat/lon hero values but
@@ -701,24 +313,6 @@ static int drawTimeBlock(int x, int y, int w, const RenderSnapshot &s) {
 // Ring-buffer line chart. `count`/`head` follow the same convention as the
 // raw-log ring buffer: `head` is the next write index, the most recent
 // sample is at (head-1).
-static void drawSparkline(int x, int y, int w, int h, const float *values, int count, uint32_t head,
-                           uint16_t color, float maxVal) {
-  auto &d = canvas;
-  d.fillRect(x, y, w, h, COLOR_BG);
-  if (count < 2) return;
-
-  int prevX = 0, prevY = 0;
-  for (int i = 0; i < count; i++) {
-    int idx = (int)((head - count + i) % SPARK_LEN);
-    if (idx < 0) idx += SPARK_LEN;
-    float norm = maxVal > 0 ? constrain(values[idx] / maxVal, 0.0f, 1.0f) : 0;
-    int px = x + (int)((float)i / (count - 1) * w);
-    int py = y + h - (int)(norm * h);
-    if (i > 0) d.drawLine(prevX, prevY, px, py, color);
-    prevX = px;
-    prevY = py;
-  }
-}
 
 static int drawTripView(int x, int y, int w, const RenderSnapshot &s) {
   auto &d = canvas;
@@ -1236,76 +830,7 @@ static void pushDirty(bool full) {
 // ------------------------------------------------------------------ setup --
 // computeLayout()/relayout() now live in layout.cpp.
 
-// ------------------------------------------------------------ power states --
-
-static void rememberBrightness() {
-  uint8_t b = M5.Display.getBrightness();
-  if (b > 0) savedBrightness = b; // never latch 0, or wake would restore to dark
-}
-
-// NOTE: M5.Display.setBrightness() is a no-op on Tab5 with M5GFX 0.2.26 --
-// Panel_Device::setBrightness() forwards to a Light instance, and Tab5's init
-// path never attaches one (Panel_DSI/ST7123/ST7121 implement no brightness
-// either, and neither IO expander carries a backlight pin). The calls are kept
-// so this does the right thing if a future M5GFX wires one up, but the visible
-// effect comes from blanking the canvas to black and pushing that.
-static void blankScreen() {
-  canvas.fillScreen(0);
-  canvas.pushSprite(&M5.Display, 0, 0);
-}
-
-// The backlight really does go off at 0: M5GFX attaches no Light instance for
-// Tab5, so M5.Display.setBrightness() does nothing and the DCS 0x51 write in
-// panelSetBrightness() is the only control there is. It works -- confirmed on
-// hardware by the panel visibly glowing when this was briefly set to
-// BRIGHTNESS_MIN instead.
-//
-// That brief detour was an attempt to explain a sleeping screen that would not
-// wake on a tap, on the theory that the ST7123 -- one controller for both the
-// display and the digitiser -- might stop reporting touch with its display
-// block idled. It is a real possibility: M5GFX's own Tab5 timing block warns
-// that shrinking the vertical front porch "will cause the touch panel to stop
-// working". But the same commit also fixed the wake path itself, which needed
-// a press AND a release both seen through a 20ms sampling window, and that is
-// the likelier reason a tap did nothing.
-//
-// So: dark again, with the wake fixes kept. If tapping a sleeping screen stops
-// working, the "touch while dark" line on the serial monitor says which half is
-// at fault -- and the targeted next step is clearing the BL bit in DCS 0x53
-// (ctrl 0x28 rather than 0x2C), which switches the backlight off without
-// touching the brightness value at all.
-static void enterBacklightOff() {
-  rememberBrightness();
-  backlightOff = true;
-  M5.Display.setBrightness(0);
-  panelSetBrightness(0);
-  blankScreen();
-}
-
-// Deliberately zeroes the backlight rather than calling M5.Display.sleep().
-// Tab5's newer panels use an integrated display+touch controller (ST7123 /
-// ST7121), so putting the panel to sleep risks taking the touch digitiser with
-// it -- which would make tap-to-wake impossible. The backlight is the dominant
-// consumer anyway, and the radio going down is the other half of the saving.
-static void enterSleep() {
-  rememberBrightness();
-  asleep = true;
-  wifiEnabled = false; // wifiTask tears the AP down and powers the radio off
-  M5.Display.setBrightness(0);
-  panelSetBrightness(0); // see enterBacklightOff() for why this is 0 again
-  blankScreen();
-}
-
-static void wakeDisplay() {
-  if (asleep) {
-    wifiEnabled = true; // wifiTask brings the AP back up
-    asleep = false;
-  }
-  backlightOff = false;
-  M5.Display.setBrightness(savedBrightness);
-  panelSetBrightness(savedBrightness);
-  relayout(); // force a full repaint and full push
-}
+// rememberBrightness()/blankScreen()/enterBacklightOff()/enterSleep()/wakeDisplay() now live in power.cpp.
 
 void setup() {
   auto cfg = M5.config();
