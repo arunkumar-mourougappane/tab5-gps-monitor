@@ -1378,7 +1378,9 @@
     ev.preventDefault();
     stage.setPointerCapture(ev.pointerId);
     pointerDown = true;
-    if (UI.asleep || UI.backlightOff) return;
+    // Wake on the press, not the lift: there is nothing else a tap can mean
+    // while the screen is dark, and one edge is more robust than two.
+    if (UI.asleep || UI.backlightOff) { wake(); return; }
     const { x, y } = toDevice(ev);
     // Capture the chip and the down position: the release commits on these,
     // not on a fresh test of wherever the finger lifted.
@@ -1411,7 +1413,7 @@
     dragging = false;
     UI.press = null;
 
-    // A tap on a dark screen only restores it, and is consumed.
+    // The waking press already restored the screen and is consumed here.
     if (UI.asleep || UI.backlightOff) { wake(); return; }
 
     if (UI.dimmerOpen) {

@@ -1924,11 +1924,20 @@ static void blankScreen() {
   canvas.pushSprite(&M5.Display, 0, 0);
 }
 
+// Darkness comes from blankScreen() painting the framebuffer black, not from
+// the backlight: M5.Display.setBrightness() is a no-op on this hardware and the
+// DCS route is unverified. So the panel is told BRIGHTNESS_MIN rather than 0.
+//
+// Writing 0 was a real risk with nothing to gain. The ST7123 is an integrated
+// display AND touch controller -- the same reason enterSleep() below avoids
+// M5.Display.sleep() -- so a command that idles its display block may take the
+// digitiser with it, and a panel that cannot report touch cannot be woken by
+// tapping it. An all-black framebuffer at the minimum level reads as off.
 static void enterBacklightOff() {
   rememberBrightness();
   backlightOff = true;
-  M5.Display.setBrightness(0);
-  panelSetBrightness(0);
+  M5.Display.setBrightness(BRIGHTNESS_MIN);
+  panelSetBrightness(BRIGHTNESS_MIN);
   blankScreen();
 }
 
@@ -1941,8 +1950,8 @@ static void enterSleep() {
   rememberBrightness();
   asleep = true;
   wifiEnabled = false; // wifiTask tears the AP down and powers the radio off
-  M5.Display.setBrightness(0);
-  panelSetBrightness(0);
+  M5.Display.setBrightness(BRIGHTNESS_MIN); // never 0 -- see enterBacklightOff()
+  panelSetBrightness(BRIGHTNESS_MIN);
   blankScreen();
 }
 
@@ -2071,12 +2080,30 @@ void loop() {
   // Note GPS ingestion, SD logging and trip stats all keep running here; only
   // the display work is skipped.
   if (asleep || backlightOff) {
-    if (released) {
+    // Wake on the press, not the lift. Waiting for a full press-release cycle
+    // meant both edges had to be observed through a 20ms sampling window; the
+    // press alone is unambiguous, and there is nothing else a tap could mean
+    // while the screen is dark.
+    if (pressEdge || released) {
       capturedTarget = PressTarget::NONE; // the waking tap commits nothing else
       wakeDisplay();
-    } else {
-      vTaskDelay(pdMS_TO_TICKS(20)); // nothing is visible, so ease off the CPU
+      return;
     }
+    // Escape hatch: if the panel stops reporting touch while dark, the power
+    // button still gets the display back.
+    if (M5.BtnPWR.wasClicked()) {
+      capturedTarget = PressTarget::NONE;
+      wakeDisplay();
+      return;
+    }
+    // Whether the digitiser reports anything at all while dark is the one
+    // thing that cannot be reasoned about off-device, so say so on the wire.
+    static uint32_t lastDarkLogMs = 0;
+    if (touchPressing && millis() - lastDarkLogMs > 1000) {
+      lastDarkLogMs = millis();
+      Serial.printf("touch while dark: %d,%d\n", touchLastX, touchLastY);
+    }
+    vTaskDelay(pdMS_TO_TICKS(20)); // nothing is visible, so ease off the CPU
     return;
   }
 
