@@ -64,87 +64,7 @@ static int radarBgSize = 0;
 
 #include "gps_model.h"
 #include "trip_stats.h"
-// ------------------------------------------------------- NMEA line parsing --
-// All of this only ever runs inside gpsTask, holding stateMutex.
-
-// Splits in place: each comma becomes a NUL and `out` points into `s`, so a
-// sentence costs no allocations at all. The previous String-based version
-// heap-allocated one substring per field -- up to 24 per sentence, ~50
-// sentences a second, every one of them inside stateMutex.
-static int splitCSV(char *s, char *out[], int maxTokens) {
-  int count = 0;
-  char *p = s;
-  while (count < maxTokens) {
-    out[count++] = p;
-    char *comma = strchr(p, ',');
-    if (comma == nullptr) break;
-    *comma = '\0';
-    p = comma + 1;
-  }
-  return count;
-}
-
-static void parseGSV(const char *talker, char *tokens[], int n) {
-  // $xxGSV,numMsgs,msgNum,numSatsInView,[prn,elev,az,snr]x4...*CS
-  int idx = 4;
-  while (idx + 3 < n) {
-    if (tokens[idx][0] != '\0') {
-      int prn = atoi(tokens[idx]);
-      int elev = tokens[idx + 1][0] ? atoi(tokens[idx + 1]) : -1;
-      int az = tokens[idx + 2][0] ? atoi(tokens[idx + 2]) : -1;
-      int snr = tokens[idx + 3][0] ? atoi(tokens[idx + 3]) : -1;
-      upsertSat(talker, prn, elev, az, snr);
-    }
-    idx += 4;
-  }
-}
-
-static void parseGSA(char *tokens[], int n) {
-  // $xxGSA,mode,fixType,prn1..prn12,PDOP,HDOP,VDOP*CS
-  if (n < 18) return;
-  gsaFixType = tokens[2][0] ? atoi(tokens[2]) : 1;
-  gsaPDOP = atof(tokens[15]);
-  gsaVDOP = atof(tokens[17]);
-}
-
-static constexpr int LOG_LINES = 40;
-// Longest legal NMEA sentence is 82 bytes including CRLF; the assembler caps a
-// line at 100 like the String version did, so 104 leaves room for the NUL.
-static constexpr int RAW_LINE_MAX = 104;
-static char rawLog[LOG_LINES][RAW_LINE_MAX];
-static uint32_t rawLogHead = 0;
-static uint32_t lastSentenceMs = 0;
-
-static constexpr int NUM_SENTENCE_TYPES = 9;
-static const char *SENTENCE_TYPES[NUM_SENTENCE_TYPES] = {"GGA", "RMC", "GSV", "GSA", "GLL", "VTG", "ZDA", "TXT", "OTH"};
-static uint32_t sentenceTypeCounts[NUM_SENTENCE_TYPES] = {0};
-
-// On-screen sentence filter. GSV is the bulk of the traffic (one message per
-// four satellites, per constellation, every second), so hiding it turns the
-// log from a flood into something readable.
-//
-// This is a *view* control only: SD logging, the TCP stream, and the GSV/GSA
-// parsing that feeds the sky plot all continue to see every sentence.
-// Mutated from loop() under stateMutex; read by gpsTask under the same lock.
-enum class NmeaFilter : uint8_t { ALL, NO_GSV, POSITION };
-static constexpr int NMEA_FILTER_COUNT = 3;
-static uint8_t nmeaFilter = (uint8_t)NmeaFilter::ALL;
-
-static const char *nmeaFilterLabel() {
-  switch ((NmeaFilter)nmeaFilter) {
-    case NmeaFilter::NO_GSV: return "NO GSV";
-    case NmeaFilter::POSITION: return "POS";
-    default: return "ALL";
-  }
-}
-
-static bool sentencePassesFilter(const char *type) {
-  switch ((NmeaFilter)nmeaFilter) {
-    case NmeaFilter::NO_GSV: return strcmp(type, "GSV") != 0;
-    case NmeaFilter::POSITION: return strcmp(type, "GGA") == 0 || strcmp(type, "RMC") == 0;
-    default: return true;
-  }
-}
+#include "nmea_parser.h"
 
 // Fixed size so the hit target matches the drawn chip regardless of label, and
 // so the chip can't resize under a changing label the way the status badges did.
@@ -165,76 +85,7 @@ static Rect nmeaFilterHitRect() {
   return {c.x - 16, c.y - 5, c.w + 24, c.h + 18};
 }
 
-// The two sinks that only gpsTask ever touches: the SD log and the TCP fan-out
-// queue. Split out of handleRawSentence() so the caller can run them without
-// holding stateMutex -- an SD write is the slowest thing in the ingest path,
-// and nothing on the render side can see either sink.
-static void logSentence(const char *line) {
-  logToSD(line);
-#if ENABLE_WIFI_NMEA
-  enqueueNmea(line);
-#endif
-}
-
-// Everything here touches state the render task reads, so it runs under
-// stateMutex -- and now nothing else does.
-static void handleRawSentence(const char *line, int len) {
-  lastSentenceMs = millis();
-
-  // The body up to '*' is what gets tokenised. Copied rather than tokenised in
-  // place because splitCSV() writes NULs over the commas, and the caller's
-  // buffer has already been handed to SD and the TCP queue as one string.
-  char core[RAW_LINE_MAX];
-  int coreLen = len;
-  const char *star = strchr(line, '*');
-  if (star != nullptr) coreLen = (int)(star - line);
-  if (coreLen >= RAW_LINE_MAX) coreLen = RAW_LINE_MAX - 1;
-  memcpy(core, line, coreLen);
-  core[coreLen] = '\0';
-
-  bool wellFormed = coreLen >= 6 && core[0] == '$';
-
-  char talker[3] = {0};
-  char type[4] = {0};
-  if (wellFormed) {
-    memcpy(talker, core + 1, 2);
-    memcpy(type, core + 3, 3);
-
-    // Counted before filtering: these stay a record of what the receiver
-    // actually emits, not of what the log happens to be showing.
-    bool matched = false;
-    for (int i = 0; i < NUM_SENTENCE_TYPES - 1; i++) {
-      if (strcmp(type, SENTENCE_TYPES[i]) == 0) {
-        sentenceTypeCounts[i]++;
-        matched = true;
-        break;
-      }
-    }
-    if (!matched) sentenceTypeCounts[NUM_SENTENCE_TYPES - 1]++;
-  }
-
-  // Filter on the way *in* so the ring holds LOG_LINES matching sentences.
-  // Filtering at draw time instead would leave only the couple of position
-  // sentences that survive within the last LOG_LINES of GSV-dominated traffic.
-  // Malformed lines are always kept -- they're the interesting ones.
-  if (!wellFormed || sentencePassesFilter(type)) {
-    strlcpy(rawLog[rawLogHead % LOG_LINES], line, RAW_LINE_MAX);
-    rawLogHead++;
-  }
-
-  if (!wellFormed) return;
-
-  // Parsing is deliberately outside the filter: the sky plot and fix mode must
-  // keep updating no matter what the log view is set to show.
-  char *tokens[24];
-  int n = splitCSV(core, tokens, 24);
-
-  if (strcmp(type, "GSV") == 0) {
-    parseGSV(talker, tokens, n);
-  } else if (strcmp(type, "GSA") == 0) {
-    parseGSA(tokens, n);
-  }
-}
+// logSentence()/handleRawSentence() now live in nmea_parser.cpp.
 
 // Formats rather than prints: the caller holds stateMutex while filling the
 // buffer (every field below is shared state) and writes it to the port after
@@ -256,7 +107,7 @@ static void formatFix(char *out, size_t cap) {
 
 // -------------------------------------------------------------- GPS task --
 
-static SemaphoreHandle_t stateMutex;
+#include "render_snapshot.h" // RenderSnapshot, captureSnapshot(), stateMutex
 
 static void gpsTaskFn(void *) {
   char lineBuf[RAW_LINE_MAX];
@@ -378,91 +229,7 @@ static void gpsTaskFn(void *) {
   }
 }
 
-// ---------------------------------------------------------- render snapshot --
-// Captured under stateMutex, then rendered unlocked so slow display I/O never
-// blocks gpsTask from draining the UART.
-
-struct RenderSnapshot {
-  bool locValid; double lat, lon;
-  bool altValid; double alt;
-  bool spdValid; double spd;
-  bool crsValid; double crs;
-  bool dateValid, timeValid;
-  int year, month, day, hour, minute, second;
-  bool satsValid; int satsUsed;
-  bool hdopValid; double hdop;
-  int fixType;
-  float pdop, vdop;
-  int visibleSats;
-
-  double tripDistanceKm;
-  double maxSpeedKmph;
-  uint32_t timeToFirstFixMs;
-  uint32_t firstFixAbsMs;
-  float hdopHistory[SPARK_LEN];
-  int hdopHistCount;
-  uint32_t hdopHistHead;
-  float speedHistory[SPARK_LEN];
-  int speedHistCount;
-  uint32_t speedHistHead;
-  uint32_t fixSecs[3];
-
-  SatInfo sats[MAX_SATS];
-
-  char logLines[LOG_LINES][RAW_LINE_MAX];
-  uint32_t logHead;
-  uint32_t lastSentenceMs;
-  uint32_t typeCounts[NUM_SENTENCE_TYPES];
-};
-
-static void captureSnapshot(RenderSnapshot &s) {
-  xSemaphoreTake(stateMutex, portMAX_DELAY);
-  s.locValid = gps.location.isValid();
-  s.lat = gps.location.lat();
-  s.lon = gps.location.lng();
-  s.altValid = gps.altitude.isValid();
-  s.alt = gps.altitude.meters();
-  s.spdValid = gps.speed.isValid();
-  s.spd = gps.speed.kmph();
-  s.crsValid = gps.course.isValid();
-  s.crs = gps.course.deg();
-  s.dateValid = gps.date.isValid();
-  s.timeValid = gps.time.isValid();
-  s.year = gps.date.year();
-  s.month = gps.date.month();
-  s.day = gps.date.day();
-  s.hour = gps.time.hour();
-  s.minute = gps.time.minute();
-  s.second = gps.time.second();
-  s.satsValid = gps.satellites.isValid();
-  s.satsUsed = gps.satellites.value();
-  s.hdopValid = gps.hdop.isValid();
-  s.hdop = gps.hdop.hdop();
-  s.fixType = gsaFixType;
-  s.pdop = gsaPDOP;
-  s.vdop = gsaVDOP;
-
-  s.tripDistanceKm = tripDistanceKm;
-  s.maxSpeedKmph = maxSpeedKmph;
-  s.timeToFirstFixMs = timeToFirstFixMs;
-  s.firstFixAbsMs = firstFixAbsMs;
-  memcpy(s.hdopHistory, hdopHistory, sizeof(hdopHistory));
-  s.hdopHistCount = hdopHistCount;
-  s.hdopHistHead = hdopHistHead;
-  memcpy(s.speedHistory, speedHistory, sizeof(speedHistory));
-  s.speedHistCount = speedHistCount;
-  s.speedHistHead = speedHistHead;
-  memcpy(s.fixSecs, fixSecs, sizeof(fixSecs));
-
-  memcpy(s.sats, satTable, sizeof(satTable)); // POD: no per-element String copies
-  s.visibleSats = countVisibleSats(s.sats);
-
-  memcpy(s.logLines, rawLog, sizeof(rawLog)); // one blockcopy, no per-line allocation
-  s.logHead = rawLogHead;
-  s.lastSentenceMs = lastSentenceMs;
-  memcpy(s.typeCounts, sentenceTypeCounts, sizeof(sentenceTypeCounts));
-  xSemaphoreGive(stateMutex);
-}
+// RenderSnapshot / captureSnapshot() now live in render_snapshot.h/.cpp.
 
 // ---------------------------------------------------------- touch/UI state --
 // Only ever touched from loop() (render side) -- no locking needed.
