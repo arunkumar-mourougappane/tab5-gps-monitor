@@ -1,0 +1,41 @@
+flowchart TD
+    UART["GPS UART\n115200 baud"]
+    TOUCHHW["Touch digitiser\nST7123"]
+    PANEL["MIPI-DSI panel\n1280x720"]
+
+    subgraph ING["Ingestion &mdash; gpsTask (own FreeRTOS task, opposite core)"]
+        direction TB
+        GT["io/gps_task\nTinyGPSPlus + line assembly"]
+        NM["model/nmea_parser\nGSV / GSA off the raw stream"]
+        GM["model/gps_model\nsatellite table"]
+        TR["model/trip_stats\ndistance, HDOP/speed history"]
+        SD["io/sd_logger"]
+        WF["io/wifi_nmea\nAP + TCP :10110"]
+        GT --> NM
+        NM --> GM
+        NM -.sinks, no lock.-> SD
+        NM -.sinks, no lock.-> WF
+        GT --> TR
+    end
+
+    MUTEX{{"stateMutex\nmodel/render_snapshot"}}
+
+    subgraph REN["Render &mdash; Arduino loop task"]
+        direction TB
+        TI["input/touch_input\nsampleTouch()"]
+        AI["input/app_input\nhandleTouch()"]
+        RP["render/render_pipeline\nsignature hash -> dirty rects"]
+        UI["ui/*\nfix, sky, log panels + chrome"]
+        PW["power\nsleep / backlight"]
+        TI --> AI
+        AI --> RP
+        AI -.dark tap, dimmer.-> PW
+        RP --> UI
+        AI -.taps.-> UI
+    end
+
+    UART --> GT
+    GT ==per-sentence lock==> MUTEX
+    MUTEX ==captureSnapshot, 5Hz poll==> RP
+    TOUCHHW --> TI
+    UI --> PANEL

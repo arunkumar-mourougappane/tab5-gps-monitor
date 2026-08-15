@@ -1,0 +1,27 @@
+sequenceDiagram
+    participant Finger
+    participant TI as touch_input
+    participant AI as app_input
+    participant UI as chip rect<br/>(e.g. LIGHT)
+
+    Finger->>TI: press, inside LIGHT's rect
+    TI->>TI: touchPressEdge = true<br/>touchDownX/Y = contact
+    AI->>UI: hitTestChips(touchDownX, touchDownY)
+    UI-->>AI: PressTarget::LIGHT
+    AI->>AI: capturedTarget = LIGHT
+    Note over AI,UI: captured once, on the press --<br/>not re-tested again below
+
+    Finger->>TI: finger drifts a few px<br/>while still down
+    Note over Finger,TI: fingertip rolls as it leaves<br/>the glass -- normal, not an error
+    TI->>TI: touchLastX/Y follows the drift
+    AI->>AI: pressTarget = capturedTarget<br/>(still LIGHT: highlight tracks<br/>the capture, not the drift)
+
+    Finger->>TI: release
+    TI->>TI: touchReleaseEdge = true
+    AI->>AI: chip = capturedTarget (LIGHT)
+    AI->>AI: dimmerOpen = true
+    Note over TI,UI: fires -- the press that captured LIGHT<br/>is what committed, drift never mattered
+
+    rect rgb(245, 235, 235)
+    Note over Finger,UI: prior behaviour (fixed 2026-08-14, commit 283b0f3):<br/>release re-ran hitTestChips() at the LIFT<br/>position instead of using the capture.<br/>A drifted lift missed the rect, so the<br/>highlight lit on press and nothing fired<br/>on release.
+    end

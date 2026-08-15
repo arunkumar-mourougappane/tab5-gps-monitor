@@ -1,0 +1,29 @@
+sequenceDiagram
+    participant UART as GPS UART
+    participant GT as gpsTask
+    participant TG as TinyGPSPlus
+    participant NP as nmea_parser
+    participant MTX as stateMutex
+    participant SNK as SD / TCP sinks
+
+    Note over GT: line assembly needs no lock<br/>the UART and line buffer<br/>belong only to this task
+    UART->>GT: bytes, until '\n'
+    GT->>SNK: logSentence(line)
+    Note over GT,SNK: outside the lock -- SD write is<br/>the slowest step in the path
+
+    GT->>MTX: take (per sentence)
+    activate MTX
+    GT->>TG: encode(line)
+    GT->>NP: handleRawSentence(line)
+    NP->>NP: parse GSV / GSA<br/>update satellite table, fix mode
+    GT->>MTX: give
+    deactivate MTX
+    Note over GT,MTX: ~50 sentences/sec, each its own<br/>lock/unlock -- not one lock<br/>around the whole UART drain
+
+    loop every completed fix epoch
+        Note over GT: epoch key = receiver's own UTC stamp,<br/>not TinyGPSPlus isUpdated()<br/>(reading a value clears its flag)
+        GT->>MTX: take
+        GT->>GT: accumulate trip stats,<br/>HDOP/speed history, fixSecs[]
+        GT->>MTX: give
+        GT->>SNK: write track CSV row (unlocked)
+    end

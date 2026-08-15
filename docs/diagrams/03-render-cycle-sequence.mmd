@@ -1,0 +1,35 @@
+sequenceDiagram
+    participant MainLoop as loop()
+    participant AI as app_input
+    participant RP as render_pipeline
+    participant MTX as stateMutex
+    participant UI as ui panels (7)
+    participant Panel as MIPI-DSI panel
+
+    MainLoop->>AI: handleTouch()
+    AI->>AI: sampleTouch(), dispatch tap
+    AI-->>MainLoop: wantFix / wantSat / wantLog, pressChanged
+
+    alt frame fully handled by app_input
+        Note over AI: dark-screen tap consumed,<br/>or modal dimmer drew + pushed<br/>its own overlay already
+        AI-->>MainLoop: return false
+        Note over MainLoop: skip runRenderCycle() this frame
+    else normal frame
+        MainLoop->>RP: runRenderCycle(wantFix/Sat/Log, pressChanged)
+        Note over RP: poll gate: 200ms, or a touch<br/>changed UI state, or press<br/>highlight moved
+        RP->>MTX: captureSnapshot() (on poll only)
+        MTX-->>RP: RenderSnapshot (by value)
+        RP->>RP: hash each panel's own inputs
+        loop for each of status/fix/sat/log
+            alt signature changed, or want*, or full repaint
+                RP->>UI: draw*Panel(snapshot)
+                RP->>RP: markDirty(panelRect)
+            end
+        end
+        RP->>Panel: pushDirty() -- banded, 120px slices
+        loop each band
+            RP->>Panel: pushSprite(clipped)
+            RP->>AI: sampleTouch() between bands
+            Note over RP,Panel: a full push blocks for a few ms<br/>with nothing polling touch --<br/>banding bounds that window
+        end
+    end
