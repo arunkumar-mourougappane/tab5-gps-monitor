@@ -213,7 +213,7 @@ void drawFixPanel(const RenderSnapshot &s) {
   else strlcpy(altBuf, "---", sizeof(altBuf));
   if (s.spdValid) snprintf(spdBuf, sizeof(spdBuf), "%.1fkm/h", s.spd);
   else strlcpy(spdBuf, "---", sizeof(spdBuf));
-  if (s.crsValid) snprintf(crsBuf, sizeof(crsBuf), "%.0f%c", s.crs, (char)0xB0);
+  if (s.crsValid) snprintf(crsBuf, sizeof(crsBuf), "%.0f", s.crs);
   else strlcpy(crsBuf, "---", sizeof(crsBuf));
 
   y = drawHeroValue(r.x, y, r.w, "LATITUDE", latBuf);
@@ -225,6 +225,13 @@ void drawFixPanel(const RenderSnapshot &s) {
   drawMiniStat(r.x, y, "ALT", altBuf);
   drawMiniStat(r.x + colW, y, "SPEED", spdBuf);
   drawMiniStat(r.x + colW * 2, y, "CRS", crsBuf);
+  // Font2/Font4 are the classic 96-glyph ASCII bitmap fonts (space..DEL) --
+  // there's no degree-sign glyph to print, so it's drawn by hand instead of
+  // smuggling a raw Latin-1 byte through print() (which read as an out-of-
+  // range glyph index and rendered as a stray line).
+  if (s.crsValid) {
+    d.drawCircle(d.getCursorX() + 4, y + 20 + 5, 3, COLOR_TEXT_PRIMARY);
+  }
   y += 58;
 
   int colW2 = r.w / 2;
