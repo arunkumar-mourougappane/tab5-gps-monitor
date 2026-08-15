@@ -485,6 +485,15 @@ static Rect nmeaFilterChipRect() {
           FILTER_CHIP_W, FILTER_CHIP_H};
 }
 
+// The chip is only 26px tall, well under a fingertip. Its target is padded to
+// 44 and reaches slightly into the card body; that region belongs to the log
+// card, which is why the filter is hit-tested before it -- a near miss used to
+// expand the whole card instead, which is a worse outcome than doing nothing.
+static Rect nmeaFilterHitRect() {
+  Rect c = nmeaFilterChipRect();
+  return {c.x - 16, c.y - 5, c.w + 24, c.h + 18};
+}
+
 // The two sinks that only gpsTask ever touches: the SD log and the TCP fan-out
 // queue. Split out of handleRawSentence() so the caller can run them without
 // holding stateMutex -- an SD write is the slowest thing in the ingest path,
@@ -817,6 +826,62 @@ static uint8_t savedBrightness = 128;
 enum class PressTarget : uint8_t { NONE, LIGHT, SLEEP, FILTER, DIM_OFF, DIM_DONE };
 static PressTarget pressTarget = PressTarget::NONE;
 
+// Which chip the press *started* on. A button fires on release of the press
+// that began inside it, rather than on a fresh hit test of the lift position:
+// re-testing the lift meant a finger that drifted a few pixels off the chip
+// lit the highlight and then did nothing at all, which reads as a button that
+// only works sometimes.
+static PressTarget capturedTarget = PressTarget::NONE;
+
+// Touch sampling. Hoisted out of loop() so it can also run between the slices
+// of a screen push -- a full-canvas blit is the longest thing the render side
+// does, and while it runs nothing polls the panel. A quick tap that started
+// and ended inside one of those windows was simply never seen: the driver
+// only reads the hardware when we call it, so there is no event left to
+// recover afterwards.
+//
+// getDetail(i) resolves through _touch_raw[i].id, and _touch_raw is only
+// refreshed for the points the current scan reports. On release the driver
+// reports zero points, so those entries hold stale data from an earlier scan
+// -- and unlike getTouchPointRaw(), getDetail() does not clamp the index
+// against the live point count. Reading a second slot that way is therefore
+// not deterministic: the stale id can alias back to slot 0 or point at an
+// unrelated detail slot.
+//
+// Instead: sample coordinates only while a contact is definitely down (raw
+// data valid then), and detect the lift ourselves as the absence of a press.
+// That is unambiguous, fires exactly once per physical touch, and is immune
+// both to the ghost second contact this panel emits and to the state machine
+// escalating a tap to hold/flick/drag.
+static bool touchWasDown = false;
+static bool touchPressing = false;
+static bool touchPressEdge = false;   // consumed by loop()
+static bool touchReleaseEdge = false; // consumed by loop()
+static int touchLastX = -1, touchLastY = -1; // current contact, for drags
+static int touchDownX = -1, touchDownY = -1; // where the press began, for hit tests
+
+static void sampleTouch() {
+  M5.update();
+  auto touch = M5.Touch.getDetail(0);
+  if (touch.isPressed()) {
+    if (!touchWasDown) {
+      touchPressEdge = true;
+      touchDownX = touch.x;
+      touchDownY = touch.y;
+    }
+    touchWasDown = true;
+    touchPressing = true;
+    touchLastX = touch.x;
+    touchLastY = touch.y;
+  } else {
+    touchPressing = false;
+    if (touchWasDown) {
+      touchWasDown = false;
+      touchReleaseEdge = true;
+    }
+  }
+}
+
 // Brightness overlay, opened from the LIGHT chip.
 static bool dimmerOpen = false;
 static bool dimmerDirty = false;
@@ -984,6 +1049,21 @@ static Rect sleepBtnRect() {
   return {TOPBAR_CTRL_X + TOPBAR_CTRL_W + BADGE_GAP, (TOPBAR_H - BADGE_H) / 2, TOPBAR_CTRL_W, BADGE_H};
 }
 
+// Touch targets, deliberately larger than the chips drawn inside them. A
+// fingertip covers roughly 40px on this panel and these chips are 36 tall, so
+// aiming at one and landing a few pixels high or low was a miss. Nothing else
+// in the top bar is tappable, so both claim its full height; horizontally they
+// take 5px of the 11px gap each, which keeps them from overlapping each other.
+static Rect lightHitRect() {
+  Rect c = lightBtnRect();
+  return {c.x - 5, 0, c.w + 10, TOPBAR_H};
+}
+
+static Rect sleepHitRect() {
+  Rect c = sleepBtnRect();
+  return {c.x - 5, 0, c.w + 10, TOPBAR_H};
+}
+
 // Press feedback is a colour swap rather than an inset/shrink: an inset would
 // leave a ring of the previous fill behind unless the surrounding background
 // were also repainted, and that background differs per call site.
@@ -1106,9 +1186,9 @@ static PressTarget hitTestChips(int x, int y) {
     if (pointInRect(x, y, dimmerDoneRect())) return PressTarget::DIM_DONE;
     return PressTarget::NONE;
   }
-  if (pointInRect(x, y, lightBtnRect())) return PressTarget::LIGHT;
-  if (pointInRect(x, y, sleepBtnRect())) return PressTarget::SLEEP;
-  if (pointInRect(x, y, nmeaFilterChipRect())) return PressTarget::FILTER;
+  if (pointInRect(x, y, lightHitRect())) return PressTarget::LIGHT;
+  if (pointInRect(x, y, sleepHitRect())) return PressTarget::SLEEP;
+  if (pointInRect(x, y, nmeaFilterHitRect())) return PressTarget::FILTER;
   return PressTarget::NONE;
 }
 
@@ -1747,17 +1827,33 @@ static void markDirty(const Rect &r) {
 // masking, so a clipped pushSprite genuinely transfers fewer pixels. Note the
 // canvas lives in PSRAM, which disables DMA on the blit -- making the transfer
 // CPU-bound and the saving proportional to the area skipped.
+// Pushed in horizontal bands with a touch sample between them. A full-canvas
+// push moves 1280x720x2 bytes out of PSRAM with no DMA, and for its whole
+// duration nothing polls the panel -- so a tap that began and ended inside it
+// was lost outright. Banding costs a few extra clip setups and bounds the
+// blind window to one slice instead of the whole blit. It is invisible: the
+// canvas is already fully composed, so the bands carry finished pixels.
+static constexpr int PUSH_SLICE_H = 120;
+
+static void pushRegion(const Rect &r) {
+  int bottom = r.y + r.h;
+  for (int y = r.y; y < bottom; y += PUSH_SLICE_H) {
+    int h = min(PUSH_SLICE_H, bottom - y);
+    M5.Display.setClipRect(r.x, y, r.w, h);
+    canvas.pushSprite(&M5.Display, 0, 0);
+    sampleTouch();
+  }
+  M5.Display.clearClipRect();
+}
+
 static void pushDirty(bool full) {
   if (full) {
-    canvas.pushSprite(&M5.Display, 0, 0);
+    pushRegion({0, 0, SCREEN_W, SCREEN_H});
     return;
   }
   for (int i = 0; i < dirtyCount; i++) {
-    const Rect &r = dirtyRects[i];
-    M5.Display.setClipRect(r.x, r.y, r.w, r.h);
-    canvas.pushSprite(&M5.Display, 0, 0);
+    pushRegion(dirtyRects[i]);
   }
-  M5.Display.clearClipRect();
 }
 
 // ------------------------------------------------------------------ setup --
@@ -1942,23 +2038,18 @@ void loop() {
   // press. That is unambiguous, fires exactly once per physical touch, and
   // is immune both to the ghost second contact this panel emits and to the
   // state machine escalating a tap to hold/flick/drag.
-  static bool touchWasDown = false;
-  static int touchLastX = -1, touchLastY = -1;
+  sampleTouch();
+  bool pressing = touchPressing;
+  bool pressEdge = touchPressEdge;
+  bool released = touchReleaseEdge;
+  touchPressEdge = false;
+  touchReleaseEdge = false;
 
-  bool released = false;
-  bool pressing = false;
-  {
-    auto touch = M5.Touch.getDetail(0);
-    if (touch.isPressed()) {
-      touchWasDown = true;
-      touchLastX = touch.x;
-      touchLastY = touch.y;
-      pressing = true;
-    } else if (touchWasDown) {
-      touchWasDown = false;
-      released = true;
-    }
-  }
+  // Everything below hit-tests the touch-DOWN position, not the lift position.
+  // A fingertip rolls as it leaves the glass, so the last sample before a lift
+  // can sit several pixels from where the user actually aimed -- and it is the
+  // aim that should decide.
+  if (pressEdge) capturedTarget = hitTestChips(touchDownX, touchDownY);
 
   // While the screen is dark, a tap only restores it and is consumed -- you
   // can't aim at a control you can't see, so no other target should fire.
@@ -1966,6 +2057,7 @@ void loop() {
   // the display work is skipped.
   if (asleep || backlightOff) {
     if (released) {
+      capturedTarget = PressTarget::NONE; // the waking tap commits nothing else
       wakeDisplay();
     } else {
       vTaskDelay(pdMS_TO_TICKS(20)); // nothing is visible, so ease off the CPU
@@ -1974,9 +2066,12 @@ void loop() {
   }
 
   // Highlight whichever chip the finger is currently over, and drop it on lift.
+  // The highlight shows the captured chip for the whole press, rather than
+  // re-testing the moving contact. That keeps it honest: what is lit is what
+  // will fire on release, including when the finger has drifted off the chip.
   PressTarget prevPress = pressTarget;
   if (pressing) {
-    pressTarget = hitTestChips(touchLastX, touchLastY);
+    pressTarget = capturedTarget;
   } else if (released) {
     pressTarget = PressTarget::NONE;
   }
@@ -1992,13 +2087,14 @@ void loop() {
     if (pressChanged) dimmerDirty = true;
 
     if (released) {
-      int tx = touchLastX, ty = touchLastY;
-      if (pointInRect(tx, ty, dimmerOffRect())) {
+      PressTarget hit = capturedTarget;
+      capturedTarget = PressTarget::NONE;
+      if (hit == PressTarget::DIM_OFF) {
         dimmerOpen = false;
         enterBacklightOff(); // keeps the level just chosen for the next wake
         return;
       }
-      if (pointInRect(tx, ty, dimmerDoneRect()) || !pointInRect(tx, ty, dimmerPanelRect())) {
+      if (hit == PressTarget::DIM_DONE || !pointInRect(touchDownX, touchDownY, dimmerPanelRect())) {
         dimmerOpen = false;
         relayout(); // repaint whatever the overlay was covering
         return;
@@ -2024,17 +2120,24 @@ void loop() {
   bool wantFix = false, wantSat = false, wantLog = false;
   {
     {
-      int tx = touchLastX, ty = touchLastY;
+      // The touch-DOWN position, not the lift position: a fingertip rolls as
+      // it leaves the glass, and the aim is what should decide.
+      int tx = touchDownX, ty = touchDownY;
       if (released && tx >= 0 && ty >= 0) {
+        // Chips commit on the press that began inside them, so a small drift
+        // before the lift no longer swallows the tap.
+        PressTarget chip = capturedTarget;
+        capturedTarget = PressTarget::NONE;
+
         // Scoping the hit test to skyCard keeps the enlarged pick radius from
         // reaching across the gap into a neighbouring card.
         bool inSky = !logExpanded && pointInRect(tx, ty, skyCard);
         int hit = inSky ? hitTestSkyDot(tx, ty) : -1;
-        if (pointInRect(tx, ty, lightBtnRect())) {
+        if (chip == PressTarget::LIGHT) {
           dimmerOpen = true;
           dimmerDirty = true;
           return; // the modal block draws it on the next pass
-        } else if (pointInRect(tx, ty, sleepBtnRect())) {
+        } else if (chip == PressTarget::SLEEP) {
           enterSleep();
           return;
         } else if (hit >= 0) {
@@ -2051,7 +2154,7 @@ void loop() {
           positionView = positionView == PositionView::LIVE ? PositionView::TRIP : PositionView::LIVE;
           relayout();
           wantFix = wantSat = wantLog = true;
-        } else if (pointInRect(tx, ty, nmeaFilterChipRect())) {
+        } else if (chip == PressTarget::FILTER) {
           // Checked before the logCard branch -- the chip sits inside it.
           // Clearing the ring under the lock gives immediate feedback and
           // avoids showing a mix of pre- and post-filter sentences.

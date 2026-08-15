@@ -1299,15 +1299,26 @@
     return { x: (ev.clientX - box.left) / s, y: (ev.clientY - box.top) / s };
   }
 
+  // Touch targets are padded beyond the drawn chips -- a fingertip covers
+  // ~40px on this panel and the chips are 36 and 26 tall. Same padding the
+  // firmware uses.
+  const pad = (r, l, t, w, h) => ({ x: r.x - l, y: t, w: r.w + w, h: h });
+  const lightHit = () => pad(LIGHT_BTN, 5, 0, 10, TOPBAR_H);
+  const sleepHit = () => pad(SLEEP_BTN, 5, 0, 10, TOPBAR_H);
+  const filterHit = () => {
+    const c = filterChipRect();
+    return { x: c.x - 16, y: c.y - 5, w: c.w + 24, h: c.h + 18 };
+  };
+
   function hitChips(x, y) {
     if (UI.dimmerOpen) {
       if (hit(x, y, DIM.off)) return "DIM_OFF";
       if (hit(x, y, DIM.done)) return "DIM_DONE";
       return null;
     }
-    if (hit(x, y, LIGHT_BTN)) return "LIGHT";
-    if (hit(x, y, SLEEP_BTN)) return "SLEEP";
-    if (hit(x, y, filterChipRect())) return "FILTER";
+    if (hit(x, y, lightHit())) return "LIGHT";
+    if (hit(x, y, sleepHit())) return "SLEEP";
+    if (hit(x, y, filterHit())) return "FILTER";
     return null;
   }
 
@@ -1352,6 +1363,8 @@
   }
 
   let pointerDown = false;
+  let captured = null;      // chip the press began on
+  let downX = -1, downY = -1;
 
   stage.addEventListener("pointerdown", (ev) => {
     ev.preventDefault();
@@ -1359,30 +1372,37 @@
     pointerDown = true;
     if (UI.asleep || UI.backlightOff) return;
     const { x, y } = toDevice(ev);
-    UI.press = hitChips(x, y);
+    // Capture the chip and the down position: the release commits on these,
+    // not on a fresh test of wherever the finger lifted.
+    downX = x; downY = y;
+    captured = hitChips(x, y);
+    UI.press = captured;
     if (UI.dimmerOpen && hit(x, y, DIM.track)) setBrightnessFromTouch(x);
     renderTick(false);
   });
 
   stage.addEventListener("pointermove", (ev) => {
     if (!pointerDown || UI.asleep || UI.backlightOff) return;
-    const { x, y } = toDevice(ev);
-    UI.press = hitChips(x, y);
-    if (UI.dimmerOpen && hit(x, y, DIM.track)) setBrightnessFromTouch(x);
+    const { x } = toDevice(ev);
+    if (UI.dimmerOpen && hit(x, toDevice(ev).y, DIM.track)) setBrightnessFromTouch(x);
     renderTick(false);
   });
 
-  stage.addEventListener("pointerup", (ev) => {
+  stage.addEventListener("pointerup", () => {
     pointerDown = false;
-    const { x, y } = toDevice(ev);
+    // The touch-down position, not the lift position: a fingertip rolls as it
+    // leaves the glass, and the aim is what should decide.
+    const x = downX, y = downY;
+    const chip = captured;
+    captured = null;
     UI.press = null;
 
     // A tap on a dark screen only restores it, and is consumed.
     if (UI.asleep || UI.backlightOff) { wake(); return; }
 
     if (UI.dimmerOpen) {
-      if (hit(x, y, DIM.off)) { UI.dimmerOpen = false; goDark(false); return; }
-      if (hit(x, y, DIM.done) || !hit(x, y, DIM.panel)) { UI.dimmerOpen = false; relayout(); return; }
+      if (chip === "DIM_OFF") { UI.dimmerOpen = false; goDark(false); return; }
+      if (chip === "DIM_DONE" || !hit(x, y, DIM.panel)) { UI.dimmerOpen = false; relayout(); return; }
       renderTick(false);
       return;
     }
@@ -1390,14 +1410,14 @@
     const inSky = !UI.logExpanded && hit(x, y, RECT.sky);
     const dot = inSky ? hitSkyDot(x, y) : null;
 
-    if (hit(x, y, LIGHT_BTN)) { UI.dimmerOpen = true; renderTick(false); }
-    else if (hit(x, y, SLEEP_BTN)) { goDark(true); }
+    if (chip === "LIGHT") { UI.dimmerOpen = true; renderTick(false); }
+    else if (chip === "SLEEP") { goDark(true); }
     else if (dot) { UI.tooltip = { sat: dot.sat, at: SIM.t }; renderTick(true); }
     else if (inSky) { if (UI.tooltip) { UI.tooltip = null; renderTick(true); } }
     else if (!UI.logExpanded && hit(x, y, RECT.fix)) {
       UI.view = UI.view === "live" ? "trip" : "live";
       relayout();
-    } else if (hit(x, y, filterChipRect())) {
+    } else if (chip === "FILTER") {
       UI.filter = (UI.filter + 1) % 3;
       SIM.logRing = [];          // clearing the ring avoids a pre/post-filter mix
       relayout();
@@ -1409,7 +1429,9 @@
     }
   });
 
-  stage.addEventListener("pointercancel", () => { pointerDown = false; UI.press = null; renderTick(false); });
+  stage.addEventListener("pointercancel", () => {
+    pointerDown = false; captured = null; UI.press = null; renderTick(false);
+  });
 
   /* =====================================================================
      Controls
