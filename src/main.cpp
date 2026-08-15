@@ -36,17 +36,17 @@
 // app_input::handleTouch() then render_pipeline::runRenderCycle().
 
 #include <M5Unified.h>
-#include "config.h"
-#include "display.h"
-#include "layout.h"
-#include "sd_logger.h"
-#include "wifi_nmea.h"
-#include "gps_task.h"       // GPSSerial, gps, startGpsTask()
-#include "render_snapshot.h" // stateMutex
-#include "ui_chrome.h"      // drawStaticChrome()
-#include "ui_sky_panel.h"   // buildRadarSprite()
-#include "app_input.h"      // handleTouch()
-#include "render_pipeline.h" // runRenderCycle()
+#include "core/config.h"
+#include "core/display.h"
+#include "core/layout.h"
+#include "io/sd_logger.h"
+#include "io/wifi_nmea.h"
+#include "io/gps_task.h"       // GPSSerial, gps, startGpsTask()
+#include "model/render_snapshot.h" // stateMutex
+#include "ui/ui_chrome.h"      // drawStaticChrome()
+#include "ui/ui_sky_panel.h"   // buildRadarSprite()
+#include "input/app_input.h"      // handleTouch()
+#include "render/render_pipeline.h" // runRenderCycle()
 
 // Definition matching the extern in display.h. Every drawing module reaches
 // the panel through this off-screen PSRAM sprite: draw* functions render into
