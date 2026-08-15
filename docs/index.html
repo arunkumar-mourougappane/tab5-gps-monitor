@@ -1305,6 +1305,13 @@
   const pad = (r, l, t, w, h) => ({ x: r.x - l, y: t, w: r.w + w, h: h });
   const lightHit = () => pad(LIGHT_BTN, 5, 0, 10, TOPBAR_H);
   const sleepHit = () => pad(SLEEP_BTN, 5, 0, 10, TOPBAR_H);
+  // The track is drawn 26px tall but the knob on it is 34, and a horizontal
+  // drag never stays inside a 26px band -- so the grab area is padded past
+  // both, same as the firmware.
+  const trackHit = () => ({
+    x: DIM.track.x - 10, y: DIM.track.y - 18, w: DIM.track.w + 20, h: DIM.track.h + 36,
+  });
+
   const filterHit = () => {
     const c = filterChipRect();
     return { x: c.x - 16, y: c.y - 5, w: c.w + 24, h: c.h + 18 };
@@ -1364,6 +1371,7 @@
 
   let pointerDown = false;
   let captured = null;      // chip the press began on
+  let dragging = false;     // slider grabbed
   let downX = -1, downY = -1;
 
   stage.addEventListener("pointerdown", (ev) => {
@@ -1377,14 +1385,19 @@
     downX = x; downY = y;
     captured = hitChips(x, y);
     UI.press = captured;
-    if (UI.dimmerOpen && hit(x, y, DIM.track)) setBrightnessFromTouch(x);
+    // A press on the slider grabs it and holds it until the lift; only X
+    // matters from then on.
+    if (UI.dimmerOpen && hit(x, y, trackHit())) {
+      dragging = true;
+      setBrightnessFromTouch(x);
+    }
     renderTick(false);
   });
 
   stage.addEventListener("pointermove", (ev) => {
     if (!pointerDown || UI.asleep || UI.backlightOff) return;
-    const { x } = toDevice(ev);
-    if (UI.dimmerOpen && hit(x, toDevice(ev).y, DIM.track)) setBrightnessFromTouch(x);
+    if (!dragging) return;
+    setBrightnessFromTouch(toDevice(ev).x);
     renderTick(false);
   });
 
@@ -1395,6 +1408,7 @@
     const x = downX, y = downY;
     const chip = captured;
     captured = null;
+    dragging = false;
     UI.press = null;
 
     // A tap on a dark screen only restores it, and is consumed.
@@ -1430,7 +1444,7 @@
   });
 
   stage.addEventListener("pointercancel", () => {
-    pointerDown = false; captured = null; UI.press = null; renderTick(false);
+    pointerDown = false; captured = null; dragging = false; UI.press = null; renderTick(false);
   });
 
   /* =====================================================================

@@ -885,6 +885,7 @@ static void sampleTouch() {
 // Brightness overlay, opened from the LIGHT chip.
 static bool dimmerOpen = false;
 static bool dimmerDirty = false;
+static bool dimmerDragging = false; // slider grabbed, follows X until the lift
 static constexpr uint8_t BRIGHTNESS_MIN = 8; // slider floor: never fully dark
 static constexpr uint8_t BRIGHTNESS_MAX = 255;
 
@@ -1130,12 +1131,26 @@ static Rect dimmerDoneRect() {
   return {p.x + p.w - 30 - 150, p.y + p.h - 62, 150, 44};
 }
 
-static void setBrightnessFromTouch(int tx) {
+// Grab area for the slider. The track is drawn 26px tall but the knob riding
+// on it is 34, and a horizontal drag never stays inside a 26px band -- so the
+// area that can start and hold a drag is padded well past both. It stops short
+// of OFF/DONE at y+148 and of the percentage readout above.
+static Rect dimmerTrackHitRect() {
+  Rect t = dimmerTrackRect();
+  return {t.x - 10, t.y - 18, t.w + 20, t.h + 36};
+}
+
+// True when the level actually moved, so a drag that hasn't crossed into the
+// next step doesn't repaint the overlay or re-issue the panel command.
+static bool setBrightnessFromTouch(int tx) {
   Rect t = dimmerTrackRect();
   int rel = constrain(tx - t.x, 0, t.w);
-  savedBrightness = (uint8_t)(BRIGHTNESS_MIN + (long)(BRIGHTNESS_MAX - BRIGHTNESS_MIN) * rel / t.w);
+  uint8_t level = (uint8_t)(BRIGHTNESS_MIN + (long)(BRIGHTNESS_MAX - BRIGHTNESS_MIN) * rel / t.w);
+  if (level == savedBrightness) return false;
+  savedBrightness = level;
   M5.Display.setBrightness(savedBrightness); // no-op today; harmless if M5GFX gains a Light
   panelSetBrightness(savedBrightness);
+  return true;
 }
 
 static void drawDimmer() {
@@ -2080,10 +2095,17 @@ void loop() {
   // The brightness overlay is modal: it owns touch and drawing while open, so
   // the panels underneath can't paint over it.
   if (dimmerOpen) {
-    if (pressing && pointInRect(touchLastX, touchLastY, dimmerTrackRect())) {
-      setBrightnessFromTouch(touchLastX); // live drag
-      dimmerDirty = true;
+    // A press that starts on the slider grabs it, and keeps it until the lift.
+    // Only X matters from then on: testing the live position against the track
+    // each sample meant any vertical drift mid-slide stopped the value dead,
+    // which reads as the slider sticking.
+    if (pressEdge && pointInRect(touchDownX, touchDownY, dimmerTrackHitRect())) {
+      dimmerDragging = true;
     }
+    if (dimmerDragging && pressing) {
+      if (setBrightnessFromTouch(touchLastX)) dimmerDirty = true;
+    }
+    if (released) dimmerDragging = false;
     if (pressChanged) dimmerDirty = true;
 
     if (released) {
