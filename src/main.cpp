@@ -943,12 +943,26 @@ static void drawStaticChrome() {
 // Keeping these in one place is deliberate: the battery badge previously
 // sized itself from "100%" while printing "100% CHG", so the label overran
 // the pill and collided with the badge to its right.
-static constexpr int BADGE_H = 32;
-static constexpr int BADGE_PAD_L = 14;
-static constexpr int BADGE_PAD_R = 14;
-static constexpr int BADGE_ICON_GAP = 10;
-static constexpr int BADGE_GAP = 10; // spacing between adjacent badges
-static constexpr int BADGE_DOT_R = 5;
+//
+// Sized against two hard limits. Vertically the bar is TOPBAR_H (56px), so a
+// badge cannot exceed that minus a couple of pixels of breathing room at each
+// edge. Horizontally the row is right-aligned and chains leftward, and
+// drawStatusPill() repaints the chips before the badges -- so a row long
+// enough to reach TOPBAR_CTRL_X + 2*TOPBAR_CTRL_W + BADGE_GAP (the SLEEP
+// chip's right edge, 518) would paint over it. At Font4 the widest the row
+// gets is "NO SD" + "AP 4" + "100% CHG" + "RECEIVING", which lands its left
+// edge around x=620, leaving roughly 100px of clearance.
+static constexpr int BADGE_H = 42;
+static constexpr int BADGE_PAD_L = 18;
+static constexpr int BADGE_PAD_R = 18;
+static constexpr int BADGE_ICON_GAP = 12;
+static constexpr int BADGE_GAP = 12; // spacing between adjacent badges
+static constexpr int BADGE_DOT_R = 7;
+// Font2 (16px) left the pills looking hollow once they grew; the badge row is
+// the panel's at-a-glance status, so it gets the larger face. Everything else
+// drawn through drawChip() -- the NMEA filter chip at 26px tall, the dimmer's
+// OFF/DONE -- keeps Font2, which is why this is a parameter and not a default.
+#define BADGE_FONT (&fonts::Font4)
 
 // Action chips live on the LEFT of the top bar, at fixed positions clear of the
 // title. Deliberately not chained onto the right-hand badge row: those pills
@@ -968,12 +982,13 @@ static Rect sleepBtnRect() {
 // Press feedback is a colour swap rather than an inset/shrink: an inset would
 // leave a ring of the previous fill behind unless the surrounding background
 // were also repainted, and that background differs per call site.
-static void drawChip(const Rect &c, const char *label, uint16_t bg, uint16_t fg, bool pressed) {
+static void drawChip(const Rect &c, const char *label, uint16_t bg, uint16_t fg, bool pressed,
+                     const lgfx::IFont *font = &fonts::Font2) {
   auto &d = canvas;
   uint16_t fill = pressed ? COLOR_ACCENT : bg;
   uint16_t text = pressed ? COLOR_BG : fg;
   d.fillRoundRect(c.x, c.y, c.w, c.h, c.h / 2, fill);
-  d.setFont(&fonts::Font2);
+  d.setFont(font);
   d.setTextSize(1);
   d.setTextColor(text, fill);
   d.setCursor(c.x + (c.w - d.textWidth(label)) / 2, c.y + (c.h - d.fontHeight()) / 2);
@@ -1096,7 +1111,7 @@ static PressTarget hitTestChips(int x, int y) {
 // chain the next badge leftward from it.
 static int drawDotBadge(int rightEdgeX, int py, const char *text, uint16_t dotColor) {
   auto &d = canvas;
-  d.setFont(&fonts::Font2);
+  d.setFont(BADGE_FONT);
   d.setTextSize(1);
 
   int iconW = BADGE_DOT_R * 2;
@@ -1138,10 +1153,11 @@ static int drawBatteryBadge(int rightEdgeX, int py) {
   if (level >= 0) snprintf(text, sizeof(text), "%d%%%s", (int)level, charging ? " CHG" : "");
   else snprintf(text, sizeof(text), "--%s", charging ? " CHG" : "");
 
-  d.setFont(&fonts::Font2);
+  d.setFont(BADGE_FONT);
   d.setTextSize(1);
 
-  constexpr int bw = 22, bh = 14, nubW = 3;
+  // Icon scaled with the pill so it stays optically level with the larger text.
+  constexpr int bw = 30, bh = 18, nubW = 4;
   int iconW = bw + nubW;
   int textX = BADGE_PAD_L + iconW + BADGE_ICON_GAP;
   int pillW = textX + d.textWidth(text) + BADGE_PAD_R; // measured on the drawn string
@@ -1152,8 +1168,8 @@ static int drawBatteryBadge(int rightEdgeX, int py) {
   d.fillRoundRect(px, py, pillW, BADGE_H, BADGE_H / 2, COLOR_CARD_BG);
 
   int bx = px + BADGE_PAD_L, by = py + BADGE_H / 2 - bh / 2;
-  d.drawRoundRect(bx, by, bw, bh, 3, COLOR_TEXT_SECONDARY);
-  d.fillRect(bx + bw, by + 4, nubW, bh - 8, COLOR_TEXT_SECONDARY); // terminal nub
+  d.drawRoundRect(bx, by, bw, bh, 4, COLOR_TEXT_SECONDARY);
+  d.fillRect(bx + bw, by + 5, nubW, bh - 10, COLOR_TEXT_SECONDARY); // terminal nub
   if (level >= 0) {
     int fillW = max(2, (bw - 4) * constrain((int)level, 0, 100) / 100);
     d.fillRoundRect(bx + 2, by + 2, fillW, bh - 4, 2, barColor);
@@ -1179,8 +1195,10 @@ static void drawStatusPill(uint32_t snapLastSentenceMs) {
   // the screen, so clearing the right half stays well clear of the title.
   d.fillRect(TOPBAR_CTRL_X, 0, SCREEN_W - TOPBAR_CTRL_X, TOPBAR_H, COLOR_TOPBAR_BG);
 
-  drawChip(lightBtnRect(), "LIGHT", COLOR_CARD_BG, COLOR_TEXT_SECONDARY, pressTarget == PressTarget::LIGHT);
-  drawChip(sleepBtnRect(), "SLEEP", COLOR_CARD_BG, COLOR_TEXT_SECONDARY, pressTarget == PressTarget::SLEEP);
+  drawChip(lightBtnRect(), "LIGHT", COLOR_CARD_BG, COLOR_TEXT_SECONDARY, pressTarget == PressTarget::LIGHT,
+           BADGE_FONT);
+  drawChip(sleepBtnRect(), "SLEEP", COLOR_CARD_BG, COLOR_TEXT_SECONDARY, pressTarget == PressTarget::SLEEP,
+           BADGE_FONT);
 
   bool haveData = snapLastSentenceMs != 0 && millis() - snapLastSentenceMs < 5000;
   int py = (TOPBAR_H - BADGE_H) / 2;
