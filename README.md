@@ -33,13 +33,13 @@ python3 -m pip install --user "click<8.2"
 
 ## Architecture
 
-The firmware is a single translation unit, `src/main.cpp`.
+The firmware is split into ~20 module pairs under `src/`, wired together by `main.cpp`'s `setup()`/`loop()`; PlatformIO compiles every `.cpp` it finds there automatically, so no build-file changes are needed to add one. Roughly, from the ingestion side out to the screen:
 
-- **Ingestion** runs on its own FreeRTOS task, pinned to the core opposite the Arduino loop task, so a slow redraw can never stall draining the UART. Shared state is mutex-protected; the render side holds the lock only long enough to copy a snapshot, then draws unlocked.
-- **Parsing** uses [TinyGPSPlus](https://github.com/mikalhart/TinyGPSPlus) for the GGA/RMC-family fields (position, altitude, speed, course, date/time, HDOP). The per-satellite elevation/azimuth/SNR table (GSV) and the 2D/3D fix mode with PDOP/VDOP (GSA) are parsed directly off the raw sentence stream, since TinyGPSPlus exposes neither.
-- **Rendering** ([M5Unified](https://github.com/M5Stack/M5Unified) / M5GFX) targets a full-screen 16-bit PSRAM canvas sprite. Every 200 ms the loop hashes each panel's inputs and repaints only the panels whose signature changed, pushing at most four dirty rects — so the panels update at whatever rate their own data does.
-- **Touch** drives a position/trip toggle, per-satellite detail in the sky plot, an expandable NMEA log with a sentence-type filter, a brightness overlay and a sleep state. Hit testing runs on release, with edge detection done by hand — this digitiser emits a ghost second contact.
-- **Outputs** beyond the screen: raw NMEA and decoded track points to SD, and the sentence stream served to up to four clients over a Wi-Fi AP (`Tab5-GPS`) on TCP port 10110. Both keep running while the screen is off. Set `ENABLE_WIFI_NMEA` to 0 to build without the radio.
+- **Ingestion** (`gps_task`) runs on its own FreeRTOS task, pinned to the core opposite the Arduino loop task, so a slow redraw can never stall draining the UART. Shared state lives behind `stateMutex` (`render_snapshot`); the render side holds the lock only long enough to copy a snapshot, then draws unlocked.
+- **Parsing** (`nmea_parser`) uses [TinyGPSPlus](https://github.com/mikalhart/TinyGPSPlus) for the GGA/RMC-family fields (position, altitude, speed, course, date/time, HDOP). The per-satellite elevation/azimuth/SNR table (GSV) and the 2D/3D fix mode with PDOP/VDOP (GSA) are parsed directly off the raw sentence stream into `gps_model`, since TinyGPSPlus exposes neither. `trip_stats` accumulates distance, max speed, HDOP/speed history and time-at-fix-mode once per fix epoch.
+- **Storage and network** (`sd_logger`, `wifi_nmea`) write raw NMEA and decoded track points to SD, and serve the sentence stream to up to four clients over a Wi-Fi AP (`Tab5-GPS`) on TCP port 10110. Both keep running while the screen is off. Set `ENABLE_WIFI_NMEA` in `config.h` to 0 to build without the radio.
+- **Rendering** ([M5Unified](https://github.com/M5Stack/M5Unified) / M5GFX) targets a full-screen 16-bit PSRAM canvas sprite (`display`), composed by three content panels (`ui_fix_panel`, `ui_sky_panel`, `ui_log_panel`) plus chrome (`ui_chrome`, `ui_status_bar`, `ui_dimmer`) built from shared primitives (`ui_widgets`). `render_pipeline` hashes each panel's inputs every 200 ms and repaints only the panels whose signature changed, pushing at most four dirty rects in touch-interruptible bands — so panels update at whatever rate their own data does.
+- **Touch** (`touch_input`, `app_input`) drives a position/trip toggle, per-satellite detail in the sky plot, an expandable NMEA log with a sentence-type filter, a brightness overlay (`ui_dimmer`) and a sleep state (`power`). Hit testing runs on release, with edge detection done by hand — this digitiser emits a ghost second contact.
 
 ## UI reference
 
