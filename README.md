@@ -46,3 +46,7 @@ For the module dependency graph, the concurrency model and sequence diagrams of 
 ## UI reference
 
 [`docs/index.html`](docs/index.html) is a browser mockup of the panel: a simulated receiver drives the real layout arithmetic, palette, sort order and hit radii, and the touch targets behave as they do on hardware. It doubles as the reference for the layout metrics, the rgb565 palette and the touch map.
+
+<p align="center"><img src="docs/tab5-gps-monitor-demo.gif" alt="Mockup panel cycling through cold-start, driving and urban-canyon simulated GPS conditions" width="720"></p>
+
+The mockup cycling through its cold-start, driving and urban-canyon scenarios, each with its own fix quality, satellite geometry and NMEA traffic.
