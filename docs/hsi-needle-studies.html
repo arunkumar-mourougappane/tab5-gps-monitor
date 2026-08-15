@@ -1,0 +1,529 @@
+<title>HSI Needle Studies</title>
+
+<style>
+  :root {
+    --ground: #eef0f4; --surface: #ffffff; --surface-2: #f6f7fa;
+    --ink: #141720; --ink-2: #454c5e; --muted: #6a7286;
+    --rule: #d9dde6; --rule-strong: #c3c9d6; --accent: #1f6fb2; --bezel: #05070c;
+    --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --page: min(1240px, 100% - 3rem);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0b0d13; --surface: #12151d; --surface-2: #171b25;
+      --ink: #e9ecf2; --ink-2: #b3bacb; --muted: #838b9f;
+      --rule: #232838; --rule-strong: #333a4d; --accent: #58a8e8;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0b0d13; --surface: #12151d; --surface-2: #171b25;
+    --ink: #e9ecf2; --ink-2: #b3bacb; --muted: #838b9f;
+    --rule: #232838; --rule-strong: #333a4d; --accent: #58a8e8;
+  }
+
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--font-ui); font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { width: var(--page); margin-inline: auto; }
+
+  header.masthead { padding: clamp(2.5rem, 7vw, 4.5rem) 0 2rem; border-bottom: 1px solid var(--rule); }
+  .eyebrow {
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 1.1rem;
+  }
+  .eyebrow b { color: var(--accent); font-weight: 500; }
+  h1 {
+    font-size: clamp(2.2rem, 5.5vw, 3.4rem); line-height: 1.03; letter-spacing: -0.035em;
+    font-weight: 800; margin: 0; text-wrap: balance;
+  }
+  .lede { max-width: 64ch; font-size: 1.05rem; color: var(--ink-2); margin: 1.3rem 0 0; }
+
+  .controls {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 1.5rem;
+    padding: 1rem 0; margin-bottom: 2rem;
+    background: color-mix(in srgb, var(--ground) 92%, transparent);
+    backdrop-filter: blur(8px); border-bottom: 1px solid var(--rule);
+  }
+  .ctrl { display: flex; align-items: center; gap: 0.7rem; }
+  .ctrl label {
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  input[type="range"] { width: clamp(140px, 20vw, 240px); accent-color: var(--accent); }
+  .readout {
+    font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    font-size: 0.95rem; min-width: 4.2ch; color: var(--ink);
+  }
+  button {
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 0.45rem 0.8rem; border-radius: 999px;
+    border: 1px solid var(--rule-strong); background: var(--surface-2);
+    color: var(--ink-2); cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 2rem; }
+  .opt { border: 1px solid var(--rule); background: var(--surface); display: flex; flex-direction: column; }
+  .opt.pick { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+  .opt-head { padding: 1.1rem 1.25rem 0.9rem; border-bottom: 1px solid var(--rule); }
+  .opt-head h2 {
+    font-size: 1.1rem; font-weight: 700; letter-spacing: -0.015em; margin: 0;
+    display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+  }
+  .flag {
+    font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.14em;
+    text-transform: uppercase; padding: 0.2rem 0.5rem; border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .opt-head p { margin: 0.35rem 0 0; font-size: 0.89rem; color: var(--ink-2); }
+
+  .render { background: var(--bezel); padding: 14px; }
+  .render svg { display: block; width: 100%; height: auto; border-radius: 3px; }
+
+  .facts { padding: 0.9rem 1.25rem 1.25rem; }
+  .facts dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; margin: 0; }
+  .facts dt {
+    font-family: var(--font-mono); font-size: 0.63rem; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--muted); padding-top: 0.15rem;
+  }
+  .facts dd { margin: 0; font-size: 0.86rem; color: var(--ink-2); }
+  .facts dd.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .facts dd.live { color: var(--ink); font-weight: 600; }
+
+  section.notes { padding: clamp(2.5rem, 6vw, 4rem) 0 0; }
+  .rule-head {
+    display: flex; align-items: baseline; gap: 1rem;
+    border-top: 2px solid var(--ink); padding-top: 0.9rem; margin-bottom: 1.25rem;
+  }
+  .rule-head h2 { font-size: clamp(1.4rem, 3vw, 1.8rem); letter-spacing: -0.02em; margin: 0; }
+  .rule-head .tag {
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--muted); white-space: nowrap;
+  }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem 2rem; }
+  .cols h3 {
+    font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500; margin: 0 0 0.3rem;
+  }
+  .cols p { margin: 0; font-size: 0.9rem; color: var(--ink-2); }
+  code { font-family: var(--font-mono); font-size: 0.85em; }
+
+  footer {
+    margin-top: clamp(3rem, 7vw, 5rem); padding: 2rem 0 4rem;
+    border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.85rem;
+  }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">Tab5 GPS monitor &middot; <b>HSI bezel, needle treatment</b></p>
+    <h1>Six needles for<br />a crowded sky</h1>
+    <p class="lede">
+      The bezel is settled, so it is identical in all six &mdash; only the needle changes. What makes
+      this different from an aircraft HSI is that the needle here lies on top of the readout: every
+      pixel of it hides sky. Each panel counts, live, how many satellites its needle is currently
+      sitting on. Turn the sky density up and watch that number, not just the shape.
+    </p>
+  </header>
+
+  <div class="controls">
+    <div class="ctrl">
+      <label>Simulation</label>
+      <button type="button" id="play" aria-pressed="true">Pause</button>
+      <button type="button" id="manual">Manual heading</button>
+    </div>
+    <div class="ctrl">
+      <label for="hdg">Heading</label>
+      <input type="range" id="hdg" min="0" max="359" value="215" disabled />
+      <span class="readout" id="hdg-out">215&deg;</span>
+    </div>
+    <div class="ctrl">
+      <label>Sky</label>
+      <button type="button" id="dense">Dense sky</button>
+      <span class="readout" id="state-out" style="min-width:16ch">driving</span>
+    </div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <section class="notes">
+    <div class="rule-head">
+      <h2>How to judge these</h2>
+      <span class="tag">Three questions</span>
+    </div>
+    <div class="cols">
+      <div>
+        <h3>What does it hide?</h3>
+        <p>An aircraft HSI needle points at a bezel; this one points across a data plot. The counter on
+          each panel is the number of satellite dots whose centres fall under solid needle fill &mdash;
+          outline and hairline treatments read as zero because you can still see through them.</p>
+      </div>
+      <div>
+        <h3>Which end is forward?</h3>
+        <p>Today's needle is a plain line with a dot at the pivot, so direction is inferred rather than
+          shown. Anything with an asymmetric head answers it instantly; a symmetric diamond does not,
+          unless the halves differ.</p>
+      </div>
+      <div>
+        <h3>What does parked look like?</h3>
+        <p>Course over ground is meaningless below about 1&nbsp;km/h, so every option needs a resting
+          state. The simulation stops on its own every so often &mdash; watch what each one does when
+          it does. A needle that simply vanishes reads as a fault.</p>
+      </div>
+      <div>
+        <h3>Cost is not a factor here</h3>
+        <p>All six are a handful of lines and polygons drawn per frame over the pre-rendered bezel
+          sprite. Pick on legibility, not on cycles &mdash; the difference between the cheapest and the
+          dearest of these is nothing next to the blit that carries them.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Bezel geometry as settled: radius 148 inside a 366&nbsp;px sprite, 10&deg; minor and 30&deg; major
+      ticks, cardinals at 14&nbsp;px, fixed index at north, elevation rings labelled 30&deg;/60&deg;.
+      Satellite positions use the firmware's projection,
+      <code>rr = radius &times; (90 &minus; el) / 90</code>, driven by one simulated receiver shared by
+      all six panels. Colours are the rgb565 constants from <code>src/main.cpp</code>.
+    </p>
+  </footer>
+</div>
+
+<script>
+  "use strict";
+
+  const C = {
+    bg: "rgb(9,11,17)", card: "rgb(21,24,35)", divider: "rgb(45,50,66)",
+    t1: "rgb(236,239,245)", t2: "rgb(138,146,166)",
+    acc: "rgb(88,168,232)", good: "rgb(84,214,140)", warn: "rgb(232,188,74)",
+    bad: "rgb(232,92,92)", none: "rgb(90,96,112)",
+  };
+
+  const BASE_SATS = [
+    { t: "GP", prn: 10, el: 68, az: 41, snr: 48 }, { t: "GP", prn: 12, el: 34, az: 112, snr: 42 },
+    { t: "GP", prn: 15, el: 21, az: 298, snr: 31 }, { t: "GP", prn: 18, el: 55, az: 203, snr: 45 },
+    { t: "GP", prn: 24, el: 12, az: 155, snr: 18 }, { t: "GP", prn: 32, el: 79, az: 330, snr: 50 },
+    { t: "BD", prn: 7, el: 44, az: 88, snr: 39 }, { t: "BD", prn: 13, el: 26, az: 240, snr: 29 },
+    { t: "BD", prn: 21, el: 61, az: 300, snr: 41 }, { t: "GL", prn: 3, el: 38, az: 15, snr: 36 },
+    { t: "GL", prn: 9, el: 17, az: 190, snr: 22 }, { t: "GA", prn: 5, el: 72, az: 260, snr: 47 },
+    { t: "GA", prn: 11, el: 29, az: 60, snr: 33 }, { t: "GA", prn: 27, el: 8, az: 120, snr: 12 },
+  ];
+  // A second constellation's worth, for the dense-sky stress test.
+  const EXTRA_SATS = [
+    { t: "GP", prn: 2, el: 51, az: 20, snr: 44 }, { t: "GP", prn: 6, el: 30, az: 70, snr: 35 },
+    { t: "BD", prn: 4, el: 63, az: 135, snr: 46 }, { t: "BD", prn: 19, el: 40, az: 175, snr: 37 },
+    { t: "GL", prn: 14, el: 24, az: 215, snr: 27 }, { t: "GL", prn: 22, el: 47, az: 255, snr: 40 },
+    { t: "GA", prn: 8, el: 58, az: 285, snr: 43 }, { t: "GA", prn: 31, el: 15, az: 345, snr: 20 },
+    { t: "GP", prn: 26, el: 74, az: 100, snr: 49 }, { t: "BD", prn: 33, el: 36, az: 320, snr: 32 },
+  ];
+
+  const snrColor = (s) => (s < 0 ? C.none : s < 20 ? C.bad : s < 35 ? C.warn : C.good);
+
+  const BOX = 366, CX = 183, CY = 183, R = 148;
+  const rad = (d) => (d * Math.PI) / 180;
+  const px = (r, a) => [CX + r * Math.sin(rad(a)), CY - r * Math.cos(rad(a))];
+  const f = (p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`;
+
+  /* ------------------------------------------------- the settled bezel */
+  const BEZEL = (() => {
+    let g = `<circle cx="${CX}" cy="${CY}" r="${R}" fill="${C.bg}"></circle>`;
+    [R, (R * 2) / 3, R / 3].forEach((rr) => {
+      g += `<circle cx="${CX}" cy="${CY}" r="${rr}" fill="none" stroke="${C.divider}"></circle>`;
+    });
+    g += `<line x1="${CX - R}" y1="${CY}" x2="${CX + R}" y2="${CY}" stroke="${C.divider}"></line>`;
+    g += `<line x1="${CX}" y1="${CY - R}" x2="${CX}" y2="${CY + R}" stroke="${C.divider}"></line>`;
+    for (let a = 0; a < 360; a += 10) {
+      const major = a % 30 === 0;
+      const p1 = px(R + 3, a), p2 = px(R + (major ? 15 : 8), a);
+      g += `<line x1="${p1[0].toFixed(1)}" y1="${p1[1].toFixed(1)}" x2="${p2[0].toFixed(1)}" y2="${p2[1].toFixed(1)}"
+              stroke="${major ? C.t2 : C.divider}" stroke-width="${major ? 2 : 1}"></line>`;
+    }
+    g += `<polygon points="${CX},${CY - R - 2} ${CX - 7},${CY - R - 16} ${CX + 7},${CY - R - 16}" fill="${C.t1}"></polygon>`;
+    [[R / 3, "60"], [(R * 2) / 3, "30"]].forEach(([rr, t]) => {
+      g += `<text x="${CX + 4}" y="${CY - rr + 1}" fill="${C.t2}" font-size="10"
+              font-family="ui-monospace, monospace" dominant-baseline="central">${t}&#176;</text>`;
+    });
+    [["N", 0], ["E", 90], ["S", 180], ["W", 270]].forEach(([ch, a]) => {
+      const p = px(R + 30, a);
+      g += `<text x="${p[0].toFixed(1)}" y="${p[1].toFixed(1)}" fill="${C.t2}" font-size="14"
+              font-family="ui-sans-serif, system-ui" font-weight="600" text-anchor="middle"
+              dominant-baseline="central">${ch}</text>`;
+    });
+    return g;
+  })();
+
+  function dots() {
+    return SIM.sats.map((s) => {
+      const rr = (R * (90 - s.el)) / 90;
+      const p = px(rr, s.az);
+      const dr = 4 + (Math.min(s.snr, 55) / 55) * 5;
+      return `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${dr.toFixed(1)}"
+                fill="${snrColor(s.snr)}"></circle>`;
+    }).join("");
+  }
+
+  // How many dots sit under solid needle fill, measured rather than asserted.
+  function occluded(hdg, halfW, r0, r1) {
+    if (halfW <= 0) return 0;
+    const a = px(r0, hdg), b = px(r1, hdg);
+    const vx = b[0] - a[0], vy = b[1] - a[1];
+    const len2 = vx * vx + vy * vy;
+    let n = 0;
+    SIM.sats.forEach((s) => {
+      const rr = (R * (90 - s.el)) / 90;
+      const p = px(rr, s.az);
+      const dr = 4 + (Math.min(s.snr, 55) / 55) * 5;
+      let t = len2 ? ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const dx = p[0] - (a[0] + t * vx), dy = p[1] - (a[1] + t * vy);
+      if (Math.hypot(dx, dy) < halfW + dr * 0.5) n++;
+    });
+    return n;
+  }
+
+  const parkedPivot = (col) =>
+    `<circle cx="${CX}" cy="${CY}" r="7" fill="none" stroke="${col || C.none}" stroke-width="2"></circle>`;
+
+  /* ------------------------------------------------------- the needles */
+
+  // 1 — what the bezel mock used: shaft, triangular head, stub tail.
+  function nArrow(hdg, moving) {
+    if (!moving) return parkedPivot();
+    const tip = px(R * 0.86, hdg), bl = px(R * 0.66, hdg - 7), br = px(R * 0.66, hdg + 7);
+    const tail = px(R * 0.28, hdg + 180);
+    return `<line x1="${tail[0].toFixed(1)}" y1="${tail[1].toFixed(1)}" x2="${tip[0].toFixed(1)}" y2="${tip[1].toFixed(1)}"
+              stroke="${C.warn}" stroke-width="3" stroke-linecap="round"></line>
+            <polygon points="${f(tip)} ${f(bl)} ${f(br)}" fill="${C.warn}"></polygon>
+            <circle cx="${CX}" cy="${CY}" r="5" fill="${C.warn}"></circle>`;
+  }
+
+  // 2 — HSI course pointer: parallel shaft, solid head, tail bar across.
+  function nPointer(hdg, moving) {
+    if (!moving) return parkedPivot();
+    const tip = px(R * 0.88, hdg), bl = px(R * 0.7, hdg - 5.5), br = px(R * 0.7, hdg + 5.5);
+    const s1 = px(R * 0.7, hdg - 1.6), s2 = px(R * 0.7, hdg + 1.6);
+    const t1 = px(R * 0.3, hdg + 180 - 1.6), t2 = px(R * 0.3, hdg + 180 + 1.6);
+    const barA = px(R * 0.3, hdg + 180 - 9), barB = px(R * 0.3, hdg + 180 + 9);
+    return `<polygon points="${f(tip)} ${f(bl)} ${f(br)}" fill="${C.warn}"></polygon>
+            <polygon points="${f(s1)} ${f(s2)} ${f(t2)} ${f(t1)}" fill="${C.warn}"></polygon>
+            <line x1="${barA[0].toFixed(1)}" y1="${barA[1].toFixed(1)}" x2="${barB[0].toFixed(1)}" y2="${barB[1].toFixed(1)}"
+              stroke="${C.warn}" stroke-width="3" stroke-linecap="round"></line>`;
+  }
+
+  // 3 — compass needle: solid fore half, hollow aft half.
+  function nSplit(hdg, moving) {
+    if (!moving) return parkedPivot();
+    const tip = px(R * 0.82, hdg), tail = px(R * 0.82, hdg + 180);
+    const l = px(R * 0.1, hdg - 90), r = px(R * 0.1, hdg + 90);
+    return `<polygon points="${f(tip)} ${f(l)} ${f(r)}" fill="${C.warn}"></polygon>
+            <polygon points="${f(tail)} ${f(l)} ${f(r)}" fill="none" stroke="${C.warn}"
+              stroke-width="1.5" stroke-linejoin="round"></polygon>`;
+  }
+
+  // 4 — nothing in the plot at all: a chevron riding the bezel.
+  function nBezelChevron(hdg, moving) {
+    if (!moving) {
+      return `<circle cx="${CX}" cy="${CY}" r="0" fill="none"></circle>` +
+        `<text x="${CX}" y="${CY + R + 26}" fill="${C.none}" font-size="11"
+           font-family="ui-monospace, monospace" text-anchor="middle">NO COURSE</text>`;
+    }
+    const outer = px(R + 20, hdg), il = px(R + 3, hdg - 5), ir = px(R + 3, hdg + 5);
+    const arcA = px(R + 1, hdg - 5), arcB = px(R + 1, hdg + 5);
+    return `<polygon points="${f(outer)} ${f(il)} ${f(ir)}" fill="${C.warn}"></polygon>
+            <path d="M ${f(arcA).replace(",", " ")} A ${R + 1} ${R + 1} 0 0 1 ${f(arcB).replace(",", " ")}"
+              fill="none" stroke="${C.warn}" stroke-width="3"></path>`;
+  }
+
+  // 5 — the same arrow, drawn hollow so the sky shows through it.
+  function nOutline(hdg, moving) {
+    if (!moving) return parkedPivot(C.warn);
+    const tip = px(R * 0.86, hdg), bl = px(R * 0.68, hdg - 6.5), br = px(R * 0.68, hdg + 6.5);
+    const tail = px(R * 0.26, hdg + 180);
+    return `<line x1="${tail[0].toFixed(1)}" y1="${tail[1].toFixed(1)}" x2="${tip[0].toFixed(1)}" y2="${tip[1].toFixed(1)}"
+              stroke="${C.warn}" stroke-width="1.5"></line>
+            <polygon points="${f(tip)} ${f(bl)} ${f(br)}" fill="none" stroke="${C.warn}"
+              stroke-width="1.5" stroke-linejoin="round"></polygon>
+            <circle cx="${CX}" cy="${CY}" r="4" fill="none" stroke="${C.warn}" stroke-width="1.5"></circle>`;
+  }
+
+  // 6 — hairline through the plot plus a heading bug on the bezel.
+  function nBug(hdg, moving) {
+    if (!moving) return parkedPivot();
+    const tip = px(R * 0.9, hdg);
+    const b1 = px(R + 2, hdg - 4), b2 = px(R + 14, hdg - 4);
+    const b3 = px(R + 14, hdg + 4), b4 = px(R + 2, hdg + 4);
+    return `<line x1="${CX}" y1="${CY}" x2="${tip[0].toFixed(1)}" y2="${tip[1].toFixed(1)}"
+              stroke="${C.warn}" stroke-width="1" stroke-dasharray="6 4" opacity="0.8"></line>
+            <polygon points="${f(b1)} ${f(b2)} ${f(b3)} ${f(b4)}" fill="${C.warn}"></polygon>
+            <circle cx="${CX}" cy="${CY}" r="3" fill="${C.warn}"></circle>`;
+  }
+
+  const OPTIONS = [
+    {
+      id: "arrow", name: "Solid arrow", flag: null, pick: false,
+      blurb: "The needle from the bezel mock: 3px shaft, triangular head, stub tail. Direction is obvious; it is also the widest thing crossing the plot.",
+      draw: nArrow, halfW: 6, r0: -0.28, r1: 0.86,
+      facts: [["Direction", "Immediate"], ["Parked", "Hollow pivot"]],
+    },
+    {
+      id: "pointer", name: "HSI course pointer", flag: null, pick: false,
+      blurb: "The aircraft convention: parallel-sided shaft, solid head, a bar across the tail. Reads as a proper instrument, and the tail bar makes the reciprocal legible too.",
+      draw: nPointer, halfW: 7, r0: -0.3, r1: 0.88,
+      facts: [["Direction", "Immediate"], ["Parked", "Hollow pivot"]],
+    },
+    {
+      id: "split", name: "Compass needle", flag: null, pick: false,
+      blurb: "Solid forward half, hollow rear half, like a magnetic compass card. Handsome, but it is the fattest of the six across the middle where satellites cluster.",
+      draw: nSplit, halfW: 11, r0: -0.82, r1: 0.82,
+      facts: [["Direction", "Immediate"], ["Parked", "Hollow pivot"]],
+    },
+    {
+      id: "chevron", name: "Bezel chevron", flag: "Least occlusion", pick: true,
+      blurb: "Nothing enters the plot at all — the heading rides the bezel as a chevron with a short arc under it. The sky stays entirely readable, at the cost of not drawing a line through the middle.",
+      draw: nBezelChevron, halfW: 0, r0: 0, r1: 0,
+      facts: [["Direction", "From bezel position"], ["Parked", "Explicit NO COURSE"]],
+    },
+    {
+      id: "outline", name: "Outline arrow", flag: null, pick: false,
+      blurb: "The same arrow drawn hollow, so dots underneath stay visible through it. Keeps a line through the middle without blacking anything out.",
+      draw: nOutline, halfW: 0, r0: -0.26, r1: 0.86,
+      facts: [["Direction", "Immediate"], ["Parked", "Amber pivot ring"]],
+    },
+    {
+      id: "bug", name: "Hairline + heading bug", flag: null, pick: false,
+      blurb: "A dashed hairline to the rim plus a solid bug on the bezel — the HSI heading-bug convention. Almost nothing is hidden, and the bug is what your eye actually lands on.",
+      draw: nBug, halfW: 0.5, r0: 0, r1: 0.9,
+      facts: [["Direction", "From bug position"], ["Parked", "Hollow pivot"]],
+    },
+  ];
+
+  /* ---------------------------------------------------------- receiver */
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
+
+  const SIM = {
+    t: 0, heading: 215, turnRate: 0, speed: 46, nextEventAt: 6, phase: "straight",
+    dense: false, sats: [],
+  };
+  function loadSats() {
+    const src = SIM.dense ? BASE_SATS.concat(EXTRA_SATS) : BASE_SATS;
+    SIM.sats = src.map((s) => ({
+      ...s,
+      drift: rnd(0.5, 1.6) * (Math.random() < 0.5 ? -1 : 1),
+      elRate: rnd(-0.05, 0.05),
+    }));
+  }
+  loadSats();
+
+  function stepSim(dt) {
+    SIM.t += dt;
+    SIM.sats.forEach((s) => {
+      s.az = (s.az + s.drift * dt + 360) % 360;
+      s.el = clamp(s.el + s.elRate * dt, 4, 88);
+      s.snr = Math.round(clamp(s.snr + rnd(-1.2, 1.2), 6, 52));
+    });
+    if (SIM.t >= SIM.nextEventAt) {
+      const roll = Math.random();
+      if (SIM.phase !== "stopped" && roll < 0.2) {
+        SIM.phase = "stopped"; SIM.turnRate = 0; SIM.nextEventAt = SIM.t + rnd(4, 7);
+      } else if (roll < 0.72) {
+        SIM.phase = "turn";
+        SIM.turnRate = rnd(6, 22) * (Math.random() < 0.5 ? -1 : 1);
+        SIM.nextEventAt = SIM.t + rnd(3, 6);
+      } else {
+        SIM.phase = "straight"; SIM.turnRate = rnd(-1.5, 1.5); SIM.nextEventAt = SIM.t + rnd(4, 9);
+      }
+    }
+    const target = SIM.phase === "stopped" ? 0 : SIM.phase === "turn" ? 28 : 52;
+    SIM.speed = clamp(SIM.speed + (target - SIM.speed) * 0.12, 0, 120);
+    if (SIM.speed > 1) SIM.heading = (SIM.heading + SIM.turnRate * dt + 360) % 360;
+  }
+
+  /* ------------------------------------------------------------ render */
+  document.getElementById("grid").innerHTML = OPTIONS.map((o) => `
+    <article class="opt${o.pick ? " pick" : ""}">
+      <div class="opt-head">
+        <h2>${o.name}${o.flag ? `<span class="flag">${o.flag}</span>` : ""}</h2>
+        <p>${o.blurb}</p>
+      </div>
+      <div class="render">
+        <svg viewBox="0 0 ${BOX} ${BOX}" id="svg-${o.id}" role="img" aria-label="${o.name}"></svg>
+      </div>
+      <div class="facts">
+        <dl>
+          ${o.facts.map(([k, v]) => `<dt>${k}</dt><dd class="mono">${v}</dd>`).join("")}
+          <dt>Hiding now</dt><dd class="mono live" id="occ-${o.id}">0 satellites</dd>
+        </dl>
+      </div>
+    </article>`).join("");
+
+  const nodes = OPTIONS.map((o) => [o, document.getElementById("svg-" + o.id), document.getElementById("occ-" + o.id)]);
+  const hdgEl = document.getElementById("hdg");
+  const hdgOut = document.getElementById("hdg-out");
+  const stateOut = document.getElementById("state-out");
+  const playBtn = document.getElementById("play");
+  const manualBtn = document.getElementById("manual");
+  const denseBtn = document.getElementById("dense");
+
+  let running = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let manual = false;
+
+  function render() {
+    const hdg = manual ? Number(hdgEl.value) : Math.round(SIM.heading);
+    const moving = manual ? true : SIM.speed > 1;
+    if (!manual) hdgEl.value = String(hdg);
+    hdgOut.textContent = `${String(hdg).padStart(3, "0")}°`;
+    stateOut.textContent = manual
+      ? "manual"
+      : SIM.speed > 1
+        ? `${SIM.phase === "turn" ? "turning" : "driving"} ${SIM.speed.toFixed(0)} km/h`
+        : "stopped";
+
+    nodes.forEach(([o, svg, occ]) => {
+      svg.innerHTML = BEZEL + dots() + o.draw(hdg, moving);
+      const n = moving ? occluded(hdg, o.halfW, o.r0 * R, o.r1 * R) : 0;
+      occ.textContent = `${n} satellite${n === 1 ? "" : "s"}`;
+    });
+  }
+
+  playBtn.addEventListener("click", () => {
+    running = !running;
+    playBtn.textContent = running ? "Pause" : "Play";
+    playBtn.setAttribute("aria-pressed", String(running));
+  });
+  manualBtn.addEventListener("click", () => {
+    manual = !manual;
+    manualBtn.setAttribute("aria-pressed", String(manual));
+    hdgEl.disabled = !manual;
+    render();
+  });
+  denseBtn.addEventListener("click", () => {
+    SIM.dense = !SIM.dense;
+    denseBtn.setAttribute("aria-pressed", String(SIM.dense));
+    denseBtn.textContent = SIM.dense ? "Normal sky" : "Dense sky";
+    loadSats();
+    render();
+  });
+  hdgEl.addEventListener("input", () => { if (manual) render(); });
+
+  playBtn.textContent = running ? "Pause" : "Play";
+  playBtn.setAttribute("aria-pressed", String(running));
+
+  setInterval(() => {
+    if (!running || manual || document.hidden) return;
+    stepSim(0.1);
+    render();
+  }, 100);
+
+  render();
+</script>

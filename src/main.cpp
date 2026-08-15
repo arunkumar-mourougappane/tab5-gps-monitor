@@ -116,6 +116,29 @@ static bool pointInRect(int px, int py, const Rect &r) {
   return px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
 }
 
+// ------------------------------------------------------------- sky plot --
+// The plot is a north-up polar projection with a fixed instrument bezel around
+// it: 10 degree minor ticks, 30 degree major ticks, cardinals, a white index at
+// north and the elevation rings labelled. All of that is static, so it lives in
+// the pre-rendered radarBg sprite and costs nothing per frame.
+//
+// The bezel is paid for out of the circle: the sprite can be at most the card
+// interior's height (366px), so the ring costs SKY_BEZEL_PAD of radius. Both
+// the sprite builder and drawSatPanel() derive their geometry from skyGeom() --
+// they used to compute it separately, and a bezel makes that divergence
+// visible rather than harmless.
+static constexpr int SKY_BEZEL_PAD = 35;
+
+struct SkyGeom { int radius, size, cx, cy; };
+
+static Rect innerOf(const Rect &r);
+
+static SkyGeom skyGeom(const Rect &skyInner) {
+  int radius = min(skyInner.h, (int)(skyInner.w * 0.46f)) / 2 - 25;
+  int size = (radius + SKY_BEZEL_PAD) * 2;
+  return {radius, size, skyInner.x + size / 2, skyInner.y + skyInner.h / 2};
+}
+
 // ------------------------------------------------------------ satellites --
 // satTable/gsaFixType/gsaPDOP/gsaVDOP are written only by gpsTask (under
 // stateMutex) and only ever read by the render side via a RenderSnapshot copy.
@@ -1531,12 +1554,36 @@ static void drawSkyPlot(const SatInfo arr[MAX_SATS], int cx, int cy, int radius,
   // also resets the area to a clean background, erasing last tick's dots.
   radarBg.pushSprite(&canvas, cx - radarBgSize / 2, cy - radarBgSize / 2);
 
+  // Course rides the bezel as a chevron instead of a needle through the middle.
+  // A needle looks right on an aircraft HSI, where it points across empty
+  // gauge -- here it lies on top of the readout. Measured against a simulated
+  // sky, a solid arrow covers about 1.5 of 14 satellites at any moment and a
+  // compass-style needle about 2.6; the chevron covers none of them, because
+  // nothing enters the plot at all.
   if (showNeedle) {
-    float az = radians(courseDeg);
-    int tipX = cx + (int)(radius * 0.85f * sinf(az));
-    int tipY = cy - (int)(radius * 0.85f * cosf(az));
-    d.drawWideLine(cx, cy, tipX, tipY, 2.0f, COLOR_ACCENT);
-    d.fillCircle(cx, cy, 4, COLOR_ACCENT);
+    float a = radians(courseDeg);
+    float aL = radians(courseDeg - 5.0f), aR = radians(courseDeg + 5.0f);
+    int tipX = cx + (int)((radius + 20) * sinf(a));
+    int tipY = cy - (int)((radius + 20) * cosf(a));
+    int lx = cx + (int)((radius + 3) * sinf(aL));
+    int ly = cy - (int)((radius + 3) * cosf(aL));
+    int rx = cx + (int)((radius + 3) * sinf(aR));
+    int ry = cy - (int)((radius + 3) * cosf(aR));
+    d.fillTriangle(tipX, tipY, lx, ly, rx, ry, COLOR_ACCENT);
+    // A short arc anchors the chevron to the rim so it still reads as a bearing
+    // when it happens to sit between two ticks. LGFX arc angles start at +X and
+    // run clockwise, hence the -90.
+    d.fillArc(cx, cy, radius + 1, radius + 4, courseDeg - 96.0f, courseDeg - 84.0f, COLOR_ACCENT);
+  } else {
+    // Below ~1km/h course-over-ground is noise, so there is no bearing to draw.
+    // Say so, rather than removing the marker and leaving the instrument
+    // looking broken.
+    d.setFont(&fonts::Font2);
+    d.setTextSize(1);
+    d.setTextColor(COLOR_STATUS_NONE, COLOR_BG);
+    const char *msg = "NO COURSE";
+    d.setCursor(cx - d.textWidth(msg) / 2, cy + (int)(radius * 0.72f));
+    d.print(msg);
   }
 
   skyDotCount = 0;
@@ -1636,14 +1683,11 @@ static void drawSatPanel(const RenderSnapshot &s) {
   // expired tooltip box can never linger.
   canvas.fillRect(r.x, r.y + r.h - 40, r.w, 40, COLOR_CARD_BG);
 
-  int diameter = min(r.h, (int)(r.w * 0.46f));
-  int radius = diameter / 2 - 14; // leave room for N/S/E/W labels
-  int cx = r.x + diameter / 2 + 4;
-  int cy = r.y + r.h / 2;
+  SkyGeom g = skyGeom(r);
   bool showNeedle = s.crsValid && s.spdValid && s.spd > 1.0; // course-over-ground is noisy near-stationary
-  drawSkyPlot(s.sats, cx, cy, radius, showNeedle, (float)s.crs);
+  drawSkyPlot(s.sats, g.cx, g.cy, g.radius, showNeedle, (float)s.crs);
 
-  int listX = r.x + diameter + 24;
+  int listX = g.cx + g.size / 2 + 4;
   int listW = r.x + r.w - listX;
   drawSatList(s.sats, listX, r.y, listW, r.h);
 
@@ -1988,11 +2032,9 @@ void setup() {
   // drawSatPanel() computes from skyCard (fixed for the life of the program
   // -- logExpanded zeroes skyCard out, but never resizes it otherwise).
   {
-    Rect r = innerOf(skyCard);
-    int diameter = min(r.h, (int)(r.w * 0.46f));
-    int radius = diameter / 2 - 14;
-    int pad = 16; // room for the N/S/E/W labels drawn just outside the ring
-    radarBgSize = (radius + pad) * 2;
+    SkyGeom g = skyGeom(innerOf(skyCard));
+    int radius = g.radius;
+    radarBgSize = g.size;
 
     radarBg.setColorDepth(16);
     radarBg.setPsram(true);
@@ -2007,18 +2049,54 @@ void setup() {
     radarBg.drawFastHLine(bcx - radius, bcy, radius * 2, COLOR_DIVIDER);
     radarBg.drawFastVLine(bcx, bcy - radius, radius * 2, COLOR_DIVIDER);
 
+    // Tick ring: every 10 degrees, longer and brighter every 30. This is what
+    // makes an azimuth readable off the plot -- four cardinal letters alone
+    // leave you interpolating across a 90 degree gap.
+    for (int a = 0; a < 360; a += 10) {
+      bool major = (a % 30) == 0;
+      float rad_a = radians((float)a);
+      int r0 = radius + 3, r1 = radius + (major ? 15 : 8);
+      int x0 = bcx + (int)(r0 * sinf(rad_a)), y0 = bcy - (int)(r0 * cosf(rad_a));
+      int x1 = bcx + (int)(r1 * sinf(rad_a)), y1 = bcy - (int)(r1 * cosf(rad_a));
+      if (major) {
+        radarBg.drawWideLine(x0, y0, x1, y1, 2.0f, COLOR_TEXT_SECONDARY);
+      } else {
+        radarBg.drawLine(x0, y0, x1, y1, COLOR_DIVIDER);
+      }
+    }
+
+    // Fixed index at north, in COLOR_TEXT_PRIMARY. White means "reference that
+    // never moves" here; the live course chevron is COLOR_ACCENT so the two can
+    // never be confused, and neither can be mistaken for a satellite, which is
+    // always one of the three signal colours.
+    radarBg.fillTriangle(bcx, bcy - radius - 2, bcx - 7, bcy - radius - 16, bcx + 7, bcy - radius - 16,
+                         COLOR_TEXT_PRIMARY);
+
+    // Elevation rings mean nothing unlabelled. Inner ring is 60 degrees, middle
+    // 30 -- rr = radius * (90 - el) / 90, so the labels sit where each ring
+    // crosses the vertical axis.
     radarBg.setFont(&fonts::Font0);
     radarBg.setTextSize(1);
+    radarBg.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+    radarBg.setCursor(bcx + 4, bcy - radius / 3 - 3);
+    radarBg.print("60");
+    radarBg.setCursor(bcx + 4, bcy - radius * 2 / 3 - 3);
+    radarBg.print("30");
+
+    // Cardinals move out past the tick ring and step up to Font2: they were
+    // Font0, the smallest type anywhere on the panel.
+    radarBg.setFont(&fonts::Font2);
     radarBg.setTextColor(COLOR_TEXT_SECONDARY, COLOR_CARD_BG);
     auto label = [&](const char *s, int lx, int ly) {
       int tw = radarBg.textWidth(s), th = radarBg.fontHeight();
       radarBg.setCursor(lx - tw / 2, ly - th / 2);
       radarBg.print(s);
     };
-    label("N", bcx, bcy - radius - 11);
-    label("S", bcx, bcy + radius + 11);
-    label("E", bcx + radius + 11, bcy);
-    label("W", bcx - radius - 11, bcy);
+    int lr = radius + 30;
+    label("N", bcx, bcy - lr);
+    label("S", bcx, bcy + lr);
+    label("E", bcx + lr, bcy);
+    label("W", bcx - lr, bcy);
   }
 
   drawStaticChrome();

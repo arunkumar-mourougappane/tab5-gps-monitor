@@ -1,0 +1,577 @@
+<title>Sky Compass Options</title>
+
+<style>
+  :root {
+    --ground: #eef0f4;
+    --surface: #ffffff;
+    --surface-2: #f6f7fa;
+    --ink: #141720;
+    --ink-2: #454c5e;
+    --muted: #6a7286;
+    --rule: #d9dde6;
+    --rule-strong: #c3c9d6;
+    --accent: #1f6fb2;
+    --bezel: #05070c;
+    --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --page: min(1240px, 100% - 3rem);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0b0d13; --surface: #12151d; --surface-2: #171b25;
+      --ink: #e9ecf2; --ink-2: #b3bacb; --muted: #838b9f;
+      --rule: #232838; --rule-strong: #333a4d; --accent: #58a8e8;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0b0d13; --surface: #12151d; --surface-2: #171b25;
+    --ink: #e9ecf2; --ink-2: #b3bacb; --muted: #838b9f;
+    --rule: #232838; --rule-strong: #333a4d; --accent: #58a8e8;
+  }
+
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--font-ui); font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { width: var(--page); margin-inline: auto; }
+
+  header.masthead { padding: clamp(2.5rem, 7vw, 4.5rem) 0 2rem; border-bottom: 1px solid var(--rule); }
+  .eyebrow {
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 1.1rem;
+  }
+  .eyebrow b { color: var(--accent); font-weight: 500; }
+  h1 {
+    font-size: clamp(2.2rem, 5.5vw, 3.4rem); line-height: 1.03; letter-spacing: -0.035em;
+    font-weight: 800; margin: 0; text-wrap: balance;
+  }
+  .lede { max-width: 64ch; font-size: 1.05rem; color: var(--ink-2); margin: 1.3rem 0 0; }
+
+  /* ------------------------------------------------------------- controls */
+  .controls {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 1.5rem;
+    padding: 1rem 0; margin-bottom: 2rem;
+    background: color-mix(in srgb, var(--ground) 92%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--rule);
+  }
+  .ctrl { display: flex; align-items: center; gap: 0.7rem; }
+  .ctrl label {
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  input[type="range"] { width: clamp(140px, 22vw, 260px); accent-color: var(--accent); }
+  .readout {
+    font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    font-size: 0.95rem; min-width: 4.2ch; color: var(--ink);
+  }
+  button {
+    font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 0.45rem 0.8rem; border-radius: 999px;
+    border: 1px solid var(--rule-strong); background: var(--surface-2);
+    color: var(--ink-2); cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+
+  /* --------------------------------------------------------------- grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 2rem;
+  }
+  .opt { border: 1px solid var(--rule); background: var(--surface); display: flex; flex-direction: column; }
+  .opt.pick { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+  .opt-head { padding: 1.1rem 1.25rem 0.9rem; border-bottom: 1px solid var(--rule); }
+  .opt-head h2 {
+    font-size: 1.12rem; font-weight: 700; letter-spacing: -0.015em; margin: 0 0 0.15rem;
+    display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+  }
+  .flag {
+    font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.14em;
+    text-transform: uppercase; padding: 0.2rem 0.5rem; border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .flag.warn {
+    background: color-mix(in srgb, #c2410c 16%, transparent);
+    color: #c2410c; border-color: color-mix(in srgb, #c2410c 35%, transparent);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .flag.warn { color: #f0916a; border-color: #f0916a55; }
+  }
+  :root[data-theme="dark"] .flag.warn { color: #f0916a; border-color: #f0916a55; }
+
+  .opt-head p { margin: 0.3rem 0 0; font-size: 0.9rem; color: var(--ink-2); }
+
+  .render { background: var(--bezel); padding: 14px; }
+  .render svg { display: block; width: 100%; height: auto; border-radius: 3px; }
+
+  .facts { padding: 0.9rem 1.25rem 1.25rem; }
+  .facts dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; margin: 0; }
+  .facts dt {
+    font-family: var(--font-mono); font-size: 0.64rem; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--muted); padding-top: 0.15rem;
+  }
+  .facts dd { margin: 0; font-size: 0.87rem; color: var(--ink-2); }
+  .facts dd.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+  section.notes { padding: clamp(2.5rem, 6vw, 4rem) 0 0; }
+  .rule-head {
+    display: flex; align-items: baseline; gap: 1rem;
+    border-top: 2px solid var(--ink); padding-top: 0.9rem; margin-bottom: 1.25rem;
+  }
+  .rule-head h2 { font-size: clamp(1.4rem, 3vw, 1.8rem); letter-spacing: -0.02em; margin: 0; }
+  .rule-head .tag {
+    font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--muted); white-space: nowrap;
+  }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem 2rem; }
+  .cols h3 {
+    font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500; margin: 0 0 0.3rem;
+  }
+  .cols p { margin: 0; font-size: 0.9rem; color: var(--ink-2); }
+  code { font-family: var(--font-mono); font-size: 0.85em; }
+
+  footer {
+    margin-top: clamp(3rem, 7vw, 5rem); padding: 2rem 0 4rem;
+    border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.85rem;
+  }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">Tab5 GPS monitor &middot; <b>sky card, compass treatment</b></p>
+    <h1>Four ways to draw<br />the heading</h1>
+    <p class="lede">
+      Every option below is rendered at the panel's own scale, with the firmware's palette and the real
+      polar projection, and all five are driven by one simulated receiver: the same fourteen satellites
+      drifting across the sky, signal strengths wandering, and a vehicle that turns, straightens and
+      stops. Watch how each treatment reads <em>while</em> the heading swings &mdash; that is the thing
+      a still image can't tell you. Take the heading manually if you want to hold one angle still.
+    </p>
+  </header>
+
+  <div class="controls">
+    <div class="ctrl">
+      <label>Simulation</label>
+      <button type="button" id="play" aria-pressed="true">Pause</button>
+      <button type="button" id="manual">Manual heading</button>
+    </div>
+    <div class="ctrl">
+      <label for="hdg">Heading</label>
+      <input type="range" id="hdg" min="0" max="359" value="215" disabled />
+      <span class="readout" id="hdg-out">215&deg;</span>
+    </div>
+    <div class="ctrl">
+      <label>State</label>
+      <span class="readout" id="state-out" style="min-width:16ch">driving</span>
+    </div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <section class="notes">
+    <div class="rule-head">
+      <h2>What constrains this</h2>
+      <span class="tag">Before you pick</span>
+    </div>
+    <div class="cols">
+      <div>
+        <h3>Static decoration is free</h3>
+        <p><code>radarBg</code> is a sprite rendered once at boot and blitted whole each frame &mdash; it
+          also erases the previous frame's dots. Ticks, bezels and labels baked into it cost sprite RAM
+          and boot time, and nothing per frame. Anything that must move with the heading cannot live
+          there.</p>
+      </div>
+      <div>
+        <h3>A bezel costs radius</h3>
+        <p>The sprite is centred at y=299 inside a card interior spanning 116&ndash;482, so it cannot
+          exceed 366&nbsp;px square. It is 350 today: radius 159 plus 16&nbsp;px of label padding. Every
+          pixel of tick ring comes out of the circle.</p>
+      </div>
+      <div>
+        <h3>Heading only exists while moving</h3>
+        <p>The needle is course-over-ground from the GPS, which is meaningless below about
+          1&nbsp;km/h &mdash; that is why it currently vanishes when parked. A heading that survives
+          standing still needs a magnetometer; worth confirming whether the Tab5's IMU has one before
+          designing around it.</p>
+      </div>
+      <div>
+        <h3>North-up is the convention</h3>
+        <p>Satellite azimuths in GSV are north-referenced. Rotating the plot means every reader has to
+          re-map them, and it breaks the pre-rendered sprite &mdash; which is why option four is shown
+          but not recommended.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Geometry transcribed from <code>src/main.cpp</code>: card interior 493,116 753&times;366; plot
+      centre 670,299; current radius 159; rings at r, 2r/3 and r/3 for the horizon, 30&deg; and 60&deg;
+      elevation. Satellite positions use the firmware's own projection,
+      <code>rr = radius &times; (90 &minus; el) / 90</code>. Sample fix data.
+    </p>
+  </footer>
+</div>
+
+<script>
+  "use strict";
+
+  // Palette — the rgb565 constants from src/main.cpp.
+  const C = {
+    bg: "rgb(9,11,17)", card: "rgb(21,24,35)", divider: "rgb(45,50,66)",
+    t1: "rgb(236,239,245)", t2: "rgb(138,146,166)",
+    acc: "rgb(88,168,232)", good: "rgb(84,214,140)", warn: "rgb(232,188,74)",
+    bad: "rgb(232,92,92)", none: "rgb(90,96,112)",
+  };
+
+  const SATS = [
+    { t: "GP", prn: 10, el: 68, az: 41, snr: 48 }, { t: "GP", prn: 12, el: 34, az: 112, snr: 42 },
+    { t: "GP", prn: 15, el: 21, az: 298, snr: 31 }, { t: "GP", prn: 18, el: 55, az: 203, snr: 45 },
+    { t: "GP", prn: 24, el: 12, az: 155, snr: 18 }, { t: "GP", prn: 32, el: 79, az: 330, snr: 50 },
+    { t: "BD", prn: 7, el: 44, az: 88, snr: 39 }, { t: "BD", prn: 13, el: 26, az: 240, snr: 29 },
+    { t: "BD", prn: 21, el: 61, az: 300, snr: 41 }, { t: "GL", prn: 3, el: 38, az: 15, snr: 36 },
+    { t: "GL", prn: 9, el: 17, az: 190, snr: 22 }, { t: "GA", prn: 5, el: 72, az: 260, snr: 47 },
+    { t: "GA", prn: 11, el: 29, az: 60, snr: 33 }, { t: "GA", prn: 27, el: 8, az: 120, snr: 12 },
+  ];
+  const snrColor = (s) => (s < 0 ? C.none : s < 20 ? C.bad : s < 35 ? C.warn : C.good);
+
+  const BOX = 366;             // sprite budget: the card interior's full height
+  const CX = BOX / 2, CY = BOX / 2;
+  const rad = (d) => (d * Math.PI) / 180;
+  const px = (cx, cy, r, a) => [cx + r * Math.sin(rad(a)), cy - r * Math.cos(rad(a))];
+
+  /* ---------------------------------------------------------- primitives */
+  function face(r) {
+    return `<circle cx="${CX}" cy="${CY}" r="${r}" fill="${C.bg}"></circle>` +
+      [r, (r * 2) / 3, r / 3].map((rr) =>
+        `<circle cx="${CX}" cy="${CY}" r="${rr}" fill="none" stroke="${C.divider}"></circle>`).join("") +
+      `<line x1="${CX - r}" y1="${CY}" x2="${CX + r}" y2="${CY}" stroke="${C.divider}"></line>` +
+      `<line x1="${CX}" y1="${CY - r}" x2="${CX}" y2="${CY + r}" stroke="${C.divider}"></line>`;
+  }
+
+  function dots(r, rotate) {
+    return SIM.sats.map((s) => {
+      const a = s.az - rotate;
+      const rr = (r * (90 - s.el)) / 90;
+      const [x, y] = px(CX, CY, rr, a);
+      const dotR = 4 + (Math.min(s.snr, 55) / 55) * 5;
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${dotR.toFixed(1)}" fill="${snrColor(s.snr)}"></circle>`;
+    }).join("");
+  }
+
+  function cardinals(r, size, rotate) {
+    return [["N", 0], ["E", 90], ["S", 180], ["W", 270]].map(([ch, a]) => {
+      const [x, y] = px(CX, CY, r, a - rotate);
+      return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" fill="${C.t2}" font-size="${size}"
+                font-family="ui-sans-serif, system-ui" font-weight="${size > 11 ? 600 : 400}"
+                text-anchor="middle" dominant-baseline="central">${ch}</text>`;
+    }).join("");
+  }
+
+  // Today's needle: a plain 2px line with a dot at the pivot.
+  function plainNeedle(r, hdg, moving) {
+    if (!moving) return "";
+    const [tx, ty] = px(CX, CY, r * 0.85, hdg);
+    return `<line x1="${CX}" y1="${CY}" x2="${tx.toFixed(1)}" y2="${ty.toFixed(1)}"
+              stroke="${C.acc}" stroke-width="2" stroke-linecap="round"></line>
+            <circle cx="${CX}" cy="${CY}" r="4" fill="${C.acc}"></circle>`;
+  }
+
+  // Proposed needle: arrowhead forward, short tail back, its own colour so it
+  // never reads as a satellite. Hollow ring when parked instead of vanishing.
+  function arrowNeedle(r, hdg, moving, color) {
+    const col = color || C.warn;
+    if (!moving) {
+      return `<circle cx="${CX}" cy="${CY}" r="7" fill="none" stroke="${C.none}" stroke-width="2"></circle>`;
+    }
+    const tip = px(CX, CY, r * 0.86, hdg);
+    const bl = px(CX, CY, r * 0.66, hdg - 7);
+    const br = px(CX, CY, r * 0.66, hdg + 7);
+    const tail = px(CX, CY, r * 0.28, hdg + 180);
+    const f = (p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`;
+    return `<line x1="${f(tail).split(",")[0]}" y1="${f(tail).split(",")[1]}"
+                  x2="${tip[0].toFixed(1)}" y2="${tip[1].toFixed(1)}"
+                  stroke="${col}" stroke-width="3" stroke-linecap="round"></line>
+            <polygon points="${f(tip)} ${f(bl)} ${f(br)}" fill="${col}"></polygon>
+            <circle cx="${CX}" cy="${CY}" r="5" fill="${col}"></circle>`;
+  }
+
+  /* ------------------------------------------------------------- options */
+
+  // 1 — as shipped today.
+  function optCurrent(hdg, moving) {
+    const r = 159;
+    return face(r) + cardinals(r + 11, 10, 0) + plainNeedle(r, hdg, moving) + dots(r, 0);
+  }
+
+  // 2 — HSI bezel: tick ring, readable cardinals, fixed index, elevation labels.
+  function optHsi(hdg, moving) {
+    const r = 148;
+    let ticks = "";
+    for (let a = 0; a < 360; a += 10) {
+      const major = a % 30 === 0;
+      const [x1, y1] = px(CX, CY, r + 3, a);
+      const [x2, y2] = px(CX, CY, r + (major ? 15 : 8), a);
+      ticks += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"
+                  stroke="${major ? C.t2 : C.divider}" stroke-width="${major ? 2 : 1}"></line>`;
+    }
+    // Fixed index at north — the reference the needle is read against.
+    const idx = `<polygon points="${CX},${CY - r - 2} ${CX - 7},${CY - r - 16} ${CX + 7},${CY - r - 16}"
+                   fill="${C.t1}"></polygon>`;
+    // Elevation rings labelled where they cross the vertical axis.
+    const elLbl = [[r / 3, "60"], [(r * 2) / 3, "30"]].map(([rr, t]) =>
+      `<text x="${CX + 4}" y="${CY - rr + 1}" fill="${C.t2}" font-size="10"
+         font-family="ui-monospace, monospace" dominant-baseline="central">${t}&#176;</text>`).join("");
+    return face(r) + ticks + idx + elLbl + cardinals(r + 30, 14, 0) +
+      arrowNeedle(r, hdg, moving) + dots(r, 0);
+  }
+
+  // 3 — same circle, defects fixed only.
+  function optMinimal(hdg, moving) {
+    const r = 159;
+    return face(r) + cardinals(r + 13, 14, 0) + arrowNeedle(r, hdg, moving) + dots(r, 0);
+  }
+
+  // 4 — track-up: the whole plot counter-rotates so travel is up.
+  function optTrackUp(hdg, moving) {
+    const r = 159;
+    const rot = moving ? hdg : 0;
+    const idx = `<polygon points="${CX},${CY - r - 2} ${CX - 7},${CY - r - 16} ${CX + 7},${CY - r - 16}"
+                   fill="${C.warn}"></polygon>`;
+    return face(r) + cardinals(r + 13, 14, rot) + idx +
+      `<circle cx="${CX}" cy="${CY}" r="5" fill="${C.warn}"></circle>` + dots(r, rot);
+  }
+
+  /* ----------------------------------- option 5 lives beside the circle */
+  // Heading tape: circle untouched, ribbon compass in the card header band.
+  function optTape(hdg, moving) {
+    const r = 159;
+    const tapeH = 30, tapeY = 6, tapeW = BOX;
+    const pxPerDeg = 2.4;
+    let tape = `<rect x="0" y="${tapeY}" width="${tapeW}" height="${tapeH}" fill="${C.bg}" rx="4"></rect>`;
+    if (moving) {
+      for (let d = -60; d <= 60; d += 5) {
+        const a = ((Math.round(hdg / 5) * 5 + d) % 360 + 360) % 360;
+        const x = tapeW / 2 + d * pxPerDeg;
+        if (x < 6 || x > tapeW - 6) continue;
+        const major = a % 30 === 0;
+        tape += `<line x1="${x.toFixed(1)}" y1="${tapeY + tapeH - (major ? 12 : 6)}"
+                   x2="${x.toFixed(1)}" y2="${tapeY + tapeH - 2}"
+                   stroke="${major ? C.t2 : C.divider}" stroke-width="${major ? 2 : 1}"></line>`;
+        if (major) {
+          const lbl = { 0: "N", 90: "E", 180: "S", 270: "W" }[a] || String(a).padStart(3, "0");
+          tape += `<text x="${x.toFixed(1)}" y="${tapeY + 10}" fill="${C.t2}" font-size="11"
+                     font-family="ui-monospace, monospace" text-anchor="middle"
+                     dominant-baseline="central">${lbl}</text>`;
+        }
+      }
+      tape += `<polygon points="${tapeW / 2},${tapeY + tapeH + 1} ${tapeW / 2 - 6},${tapeY + tapeH + 11}
+                 ${tapeW / 2 + 6},${tapeY + tapeH + 11}" fill="${C.warn}"></polygon>`;
+    } else {
+      tape += `<text x="${tapeW / 2}" y="${tapeY + tapeH / 2}" fill="${C.none}" font-size="12"
+                 font-family="ui-monospace, monospace" text-anchor="middle"
+                 dominant-baseline="central">NO COURSE &mdash; STATIONARY</text>`;
+    }
+    // Circle sits below the tape, so it loses a little vertical room.
+    const shift = 26;
+    const inner = `<g transform="translate(0, ${shift}) scale(${(BOX - shift * 2) / BOX})
+                     " transform-origin="${CX} ${CY}">
+                     ${face(r) + cardinals(r + 13, 14, 0) + plainNeedle(r, hdg, moving) + dots(r, 0)}
+                   </g>`;
+    return tape + inner;
+  }
+
+  /* --------------------------------------------------------------- data */
+  const OPTIONS = [
+    {
+      id: "current", name: "As shipped today", flag: null, pick: false,
+      blurb: "Three rings, a crosshair, four 8px letters and a bare line for the needle.",
+      draw: optCurrent,
+      facts: [
+        ["Radius", "159 (unchanged)"],
+        ["Reads azimuth", "Cardinals only — no ticks"],
+        ["Parked", "Needle disappears"],
+        ["Per-frame cost", "None beyond today"],
+      ],
+    },
+    {
+      id: "hsi", name: "HSI bezel", flag: "Recommended", pick: true,
+      blurb: "A proper instrument bezel: 10° minor and 30° major ticks, cardinals at panel type size, a fixed index at north, elevation rings labelled, and an arrow needle in its own colour.",
+      draw: optHsi,
+      facts: [
+        ["Radius", "148 (−11)"],
+        ["Reads azimuth", "To ~5° by eye"],
+        ["Parked", "Hollow pivot ring"],
+        ["Per-frame cost", "None — bezel is baked into the sprite"],
+      ],
+    },
+    {
+      id: "minimal", name: "Defects only", flag: null, pick: false,
+      blurb: "Keep the circle exactly as large as it is. Cardinals go from 8px to 14px, the needle gains an arrowhead and a distinct colour, and parked shows a pivot instead of nothing.",
+      draw: optMinimal,
+      facts: [
+        ["Radius", "159 (unchanged)"],
+        ["Reads azimuth", "Cardinals only — no ticks"],
+        ["Parked", "Hollow pivot ring"],
+        ["Per-frame cost", "None"],
+      ],
+    },
+    {
+      id: "tape", name: "Heading tape", flag: null, pick: false,
+      blurb: "Leave the circle alone; put a HUD-style ribbon compass above it with a fixed centre index. Gives you a numeric heading, which none of the others do.",
+      draw: optTape,
+      facts: [
+        ["Radius", "~148 effective (tape takes height)"],
+        ["Reads azimuth", "Numeric, to 1°"],
+        ["Parked", "Explicit 'no course' state"],
+        ["Per-frame cost", "Tape redraws every heading change"],
+      ],
+    },
+    {
+      id: "trackup", name: "Track-up", flag: "Not advised", pick: false,
+      blurb: "Rotate the whole plot so travel is always up. Watch what happens to the satellites when you turn — every azimuth in the GSV stream is north-referenced, so the dots now disagree with the data.",
+      draw: optTrackUp,
+      facts: [
+        ["Radius", "159 (unchanged)"],
+        ["Reads azimuth", "Relative to travel, not north"],
+        ["Parked", "Snaps back to north-up"],
+        ["Per-frame cost", "Sprite must re-render on every turn"],
+      ],
+    },
+  ];
+
+  /* ------------------------------------------------------------ receiver */
+  // One simulated receiver drives all five panels, so any difference you see
+  // between them is the treatment and nothing else.
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
+
+  const SIM = {
+    t: 0,
+    heading: 215,
+    turnRate: 0,     // deg/s
+    speed: 46,       // km/h
+    nextEventAt: 6,  // seconds
+    phase: "straight",
+    sats: SATS.map((s) => ({
+      ...s,
+      drift: rnd(0.5, 1.6) * (Math.random() < 0.5 ? -1 : 1),
+      elRate: rnd(-0.05, 0.05),
+    })),
+  };
+
+  function stepSim(dt) {
+    SIM.t += dt;
+
+    // Satellites drift across the sky and their signal wanders, exactly as in
+    // the panel simulation. Motion is time-compressed so it is visible here.
+    SIM.sats.forEach((s) => {
+      s.az = (s.az + s.drift * dt + 360) % 360;
+      s.el = clamp(s.el + s.elRate * dt, 4, 88);
+      s.snr = Math.round(clamp(s.snr + rnd(-1.2, 1.2), 6, 52));
+    });
+
+    // A drive: straights, turns of varying sharpness, and stops -- so the
+    // stationary state you have to design for turns up on its own.
+    if (SIM.t >= SIM.nextEventAt) {
+      const roll = Math.random();
+      if (SIM.phase !== "stopped" && roll < 0.22) {
+        SIM.phase = "stopped";
+        SIM.turnRate = 0;
+        SIM.nextEventAt = SIM.t + rnd(4, 7);
+      } else if (roll < 0.7) {
+        SIM.phase = "turn";
+        SIM.turnRate = rnd(6, 22) * (Math.random() < 0.5 ? -1 : 1);
+        SIM.nextEventAt = SIM.t + rnd(3, 6);
+      } else {
+        SIM.phase = "straight";
+        SIM.turnRate = rnd(-1.5, 1.5);
+        SIM.nextEventAt = SIM.t + rnd(4, 9);
+      }
+    }
+
+    const target = SIM.phase === "stopped" ? 0 : SIM.phase === "turn" ? 28 : 52;
+    SIM.speed = clamp(SIM.speed + (target - SIM.speed) * 0.12, 0, 120);
+    // Course over ground is noise when barely moving -- the receiver stops
+    // reporting a usable one, which is the whole reason for a parked state.
+    if (SIM.speed > 1) SIM.heading = (SIM.heading + SIM.turnRate * dt + 360) % 360;
+  }
+
+  /* --------------------------------------------------------------- render */
+  const grid = document.getElementById("grid");
+  grid.innerHTML = OPTIONS.map((o) => `
+    <article class="opt${o.pick ? " pick" : ""}">
+      <div class="opt-head">
+        <h2>${o.name}${o.flag ? `<span class="flag${o.flag === "Not advised" ? " warn" : ""}">${o.flag}</span>` : ""}</h2>
+        <p>${o.blurb}</p>
+      </div>
+      <div class="render">
+        <svg viewBox="0 0 ${BOX} ${BOX}" id="svg-${o.id}" role="img"
+             aria-label="${o.name} compass treatment"></svg>
+      </div>
+      <div class="facts">
+        <dl>${o.facts.map(([k, v]) => `<dt>${k}</dt><dd class="mono">${v}</dd>`).join("")}</dl>
+      </div>
+    </article>`).join("");
+
+  const svgs = OPTIONS.map((o) => [o, document.getElementById("svg-" + o.id)]);
+  const hdgEl = document.getElementById("hdg");
+  const hdgOut = document.getElementById("hdg-out");
+  const stateOut = document.getElementById("state-out");
+  const playBtn = document.getElementById("play");
+  const manualBtn = document.getElementById("manual");
+
+  let running = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let manual = false;
+
+  function render() {
+    const hdg = manual ? Number(hdgEl.value) : Math.round(SIM.heading);
+    const moving = manual ? true : SIM.speed > 1;
+    if (!manual) hdgEl.value = String(hdg);
+    hdgOut.textContent = `${String(hdg).padStart(3, "0")}\u00b0`;
+    stateOut.textContent = manual
+      ? "manual"
+      : SIM.speed > 1
+        ? `${SIM.phase === "turn" ? "turning" : "driving"} ${SIM.speed.toFixed(0)} km/h`
+        : "stopped";
+    svgs.forEach(([o, el]) => { el.innerHTML = o.draw(hdg, moving); });
+  }
+
+  playBtn.addEventListener("click", () => {
+    running = !running;
+    playBtn.textContent = running ? "Pause" : "Play";
+    playBtn.setAttribute("aria-pressed", String(running));
+  });
+
+  manualBtn.addEventListener("click", () => {
+    manual = !manual;
+    manualBtn.setAttribute("aria-pressed", String(manual));
+    hdgEl.disabled = !manual;
+    render();
+  });
+
+  hdgEl.addEventListener("input", () => { if (manual) render(); });
+
+  playBtn.textContent = running ? "Pause" : "Play";
+  playBtn.setAttribute("aria-pressed", String(running));
+
+  // 10Hz: the receiver's own course only lands at 1Hz, but the point of this
+  // page is comparing how each treatment reads mid-turn, and a 1Hz needle
+  // stutters too much to judge that fairly.
+  setInterval(() => {
+    if (!running || manual || document.hidden) return;
+    stepSim(0.1);
+    render();
+  }, 100);
+
+  render();
+</script>

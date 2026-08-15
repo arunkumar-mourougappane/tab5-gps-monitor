@@ -690,6 +690,7 @@
     logBig: { x: 16, y: 72, w: 1248, h: 632 },
   };
   const inner = (r) => ({ x: r.x + 18, y: r.y + CARD_HEADER_H + 8, w: r.w - 36, h: r.h - CARD_HEADER_H - 24 });
+  const SKY_BEZEL_PAD = 35; // tick ring + cardinals, paid for out of the radius
   const hit = (px, py, r) => px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;
 
   const LIGHT_BTN = { x: 300, y: 12, w: 104, h: 32 };
@@ -1089,10 +1090,13 @@
       return;
     }
     const r = inner(RECT.sky);
-    const diameter = Math.min(r.h, Math.floor(r.w * 0.46));
-    const radius = Math.floor(diameter / 2) - 14;
-    const cx = r.x + Math.floor(diameter / 2) + 4;
+    // Geometry from skyGeom() in the firmware: the bezel is paid for out of the
+    // circle, since the sprite can be at most the card interior's height.
+    const radius = Math.floor(Math.min(r.h, Math.floor(r.w * 0.46)) / 2) - 25;
+    const size = (radius + SKY_BEZEL_PAD) * 2;
+    const cx = r.x + size / 2;
     const cy = r.y + Math.floor(r.h / 2);
+    const pol = (rr, deg) => [cx + rr * Math.sin(deg * Math.PI / 180), cy - rr * Math.cos(deg * Math.PI / 180)];
 
     let h = el("abs radar-face", at(cx - radius, cy - radius, `width:${radius * 2}px;height:${radius * 2}px`));
     [radius, Math.floor((radius * 2) / 3), Math.floor(radius / 3)].forEach((rr) => {
@@ -1100,21 +1104,52 @@
     });
     h += el("abs cross", at(cx - radius, cy, `width:${radius * 2}px;height:1px`));
     h += el("abs cross", at(cx, cy - radius, `width:1px;height:${radius * 2}px`));
-    [["N", cx, cy - radius - 11], ["S", cx, cy + radius + 11],
-     ["E", cx + radius + 11, cy], ["W", cx - radius - 11, cy]].forEach(([s, lx, ly]) => {
-      h += el("abs f0 t2", at(lx - 3, ly - 4), s);
+
+    // Everything from here to the cardinals is static — in the firmware it is
+    // baked into the pre-rendered radarBg sprite and costs nothing per frame.
+    let bezel = "";
+    for (let a = 0; a < 360; a += 10) {
+      const major = a % 30 === 0;
+      const [x0, y0] = pol(radius + 3, a);
+      const [x1, y1] = pol(radius + (major ? 15 : 8), a);
+      bezel += `<line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}"
+                  stroke="${major ? C.t2 : C.divider}" stroke-width="${major ? 2 : 1}"></line>`;
+    }
+    // Fixed index at north. White is "reference that never moves"; the live
+    // course chevron is accent blue, and satellites are always a signal colour.
+    bezel += `<polygon points="${cx},${cy - radius - 2} ${cx - 7},${cy - radius - 16} ${cx + 7},${cy - radius - 16}"
+                fill="${C.t1}"></polygon>`;
+    // Inner ring is 60° elevation, middle is 30° — rr = radius × (90 − el) / 90.
+    bezel += `<text x="${cx + 4}" y="${cy - Math.floor(radius / 3)}" fill="${C.t2}" font-size="10"
+                font-family="ui-monospace, monospace" dominant-baseline="central">60</text>`;
+    bezel += `<text x="${cx + 4}" y="${cy - Math.floor(radius * 2 / 3)}" fill="${C.t2}" font-size="10"
+                font-family="ui-monospace, monospace" dominant-baseline="central">30</text>`;
+
+    // Course as a chevron on the bezel, above 1 km/h only. Nothing enters the
+    // plot, so no satellite is ever hidden by the heading.
+    if (SIM.locValid && SIM.spd > 1) {
+      const tip = pol(radius + 20, SIM.crs);
+      const bl = pol(radius + 3, SIM.crs - 5);
+      const br = pol(radius + 3, SIM.crs + 5);
+      const a0 = pol(radius + 2.5, SIM.crs - 6), a1 = pol(radius + 2.5, SIM.crs + 6);
+      const f2 = (p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`;
+      bezel += `<polygon points="${f2(tip)} ${f2(bl)} ${f2(br)}" fill="${C.acc}"></polygon>`;
+      bezel += `<path d="M ${a0[0].toFixed(1)} ${a0[1].toFixed(1)}
+                   A ${radius + 2.5} ${radius + 2.5} 0 0 1 ${a1[0].toFixed(1)} ${a1[1].toFixed(1)}"
+                 fill="none" stroke="${C.acc}" stroke-width="3"></path>`;
+    }
+    h += `<svg class="abs" style="${at(0, 0, `width:${W}px;height:${H}px`)}" aria-hidden="true">${bezel}</svg>`;
+
+    // Cardinals move out past the tick ring and step up from 8px to 14px.
+    [["N", 0], ["E", 90], ["S", 180], ["W", 270]].forEach(([lbl, a]) => {
+      const [lx, ly] = pol(radius + 30, a);
+      h += el("abs f2 t2", at(Math.round(lx) - 5, Math.round(ly) - 8), lbl);
     });
 
-    // Course needle, only above 1 km/h — course-over-ground is noise below that.
-    if (SIM.locValid && SIM.spd > 1) {
-      const a = (SIM.crs * Math.PI) / 180;
-      const tx = cx + radius * 0.85 * Math.sin(a);
-      const ty = cy - radius * 0.85 * Math.cos(a);
-      h += `<svg class="abs" style="${at(0, 0, `width:${W}px;height:${H}px`)}" aria-hidden="true">
-              <line x1="${cx}" y1="${cy}" x2="${tx.toFixed(1)}" y2="${ty.toFixed(1)}"
-                    stroke="${C.acc}" stroke-width="2" stroke-linecap="round"></line>
-              <circle cx="${cx}" cy="${cy}" r="4" fill="${C.acc}"></circle>
-            </svg>`;
+    // Below ~1 km/h there is no usable course, so say so rather than removing
+    // the marker and leaving the instrument looking broken.
+    if (!(SIM.locValid && SIM.spd > 1)) {
+      h += el("abs f2", at(cx - 38, cy + Math.round(radius * 0.72), `color:${C.none}`), "NO COURSE");
     }
 
     UI.skyDots = [];
@@ -1130,7 +1165,7 @@
       UI.skyDots.push({ x, y, sat: s });
     });
 
-    const listX = r.x + diameter + 24;
+    const listX = cx + size / 2 + 4;
     const listW = r.x + r.w - listX;
     const barX = listX + 56;
     const barW = Math.max(10, listW - 56 - 34);
