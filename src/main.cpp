@@ -945,24 +945,29 @@ static void drawStaticChrome() {
 // the pill and collided with the badge to its right.
 //
 // Sized against two hard limits. Vertically the bar is TOPBAR_H (56px), so a
-// badge cannot exceed that minus a couple of pixels of breathing room at each
-// edge. Horizontally the row is right-aligned and chains leftward, and
-// drawStatusPill() repaints the chips before the badges -- so a row long
-// enough to reach TOPBAR_CTRL_X + 2*TOPBAR_CTRL_W + BADGE_GAP (the SLEEP
-// chip's right edge, 518) would paint over it. At Font4 the widest the row
-// gets is "NO SD" + "AP 4" + "100% CHG" + "RECEIVING", which lands its left
-// edge around x=620, leaving roughly 100px of clearance.
-static constexpr int BADGE_H = 42;
-static constexpr int BADGE_PAD_L = 18;
-static constexpr int BADGE_PAD_R = 18;
-static constexpr int BADGE_ICON_GAP = 12;
-static constexpr int BADGE_GAP = 12; // spacing between adjacent badges
-static constexpr int BADGE_DOT_R = 7;
-// Font2 (16px) left the pills looking hollow once they grew; the badge row is
-// the panel's at-a-glance status, so it gets the larger face. Everything else
-// drawn through drawChip() -- the NMEA filter chip at 26px tall, the dimmer's
-// OFF/DONE -- keeps Font2, which is why this is a parameter and not a default.
-#define BADGE_FONT (&fonts::Font4)
+// badge cannot exceed that minus breathing room at each edge; 36 leaves 10px
+// above and below. Horizontally the row is right-aligned and chains leftward,
+// and drawStatusPill() repaints the chips before the badges -- so a row long
+// enough to reach the SLEEP chip's right edge (518) would paint over it.
+//
+// This is a deliberate midpoint: the pills were 32px and briefly 42px, which
+// read as oversized on the panel.
+static constexpr int BADGE_H = 36;
+static constexpr int BADGE_PAD_L = 16;
+static constexpr int BADGE_PAD_R = 16;
+static constexpr int BADGE_ICON_GAP = 11;
+static constexpr int BADGE_GAP = 11; // spacing between adjacent badges
+static constexpr int BADGE_DOT_R = 6;
+// The classic font ramp has no size between Font2 (16px) and Font4 (26px) --
+// Font0 is 8px and the next step up is 26 -- so the badge text stays at Font2
+// while the pill around it grew. Getting an intermediate size means bringing
+// in a GFX face (FreeSans9pt7b, DejaVu18), which would put a second typeface
+// in a bar that is otherwise all Font2/Font4.
+//
+// Single knob for the whole top bar: the badges and the LIGHT/SLEEP chips
+// take their face from here. Everything else drawn through drawChip() keeps
+// its own default -- the NMEA filter chip is only 26px tall.
+#define BADGE_FONT (&fonts::Font2)
 
 // Action chips live on the LEFT of the top bar, at fixed positions clear of the
 // title. Deliberately not chained onto the right-hand badge row: those pills
@@ -1156,8 +1161,8 @@ static int drawBatteryBadge(int rightEdgeX, int py) {
   d.setFont(BADGE_FONT);
   d.setTextSize(1);
 
-  // Icon scaled with the pill so it stays optically level with the larger text.
-  constexpr int bw = 30, bh = 18, nubW = 4;
+  // Icon scaled with the pill.
+  constexpr int bw = 26, bh = 16, nubW = 4;
   int iconW = bw + nubW;
   int textX = BADGE_PAD_L + iconW + BADGE_ICON_GAP;
   int pillW = textX + d.textWidth(text) + BADGE_PAD_R; // measured on the drawn string
@@ -1168,8 +1173,8 @@ static int drawBatteryBadge(int rightEdgeX, int py) {
   d.fillRoundRect(px, py, pillW, BADGE_H, BADGE_H / 2, COLOR_CARD_BG);
 
   int bx = px + BADGE_PAD_L, by = py + BADGE_H / 2 - bh / 2;
-  d.drawRoundRect(bx, by, bw, bh, 4, COLOR_TEXT_SECONDARY);
-  d.fillRect(bx + bw, by + 5, nubW, bh - 10, COLOR_TEXT_SECONDARY); // terminal nub
+  d.drawRoundRect(bx, by, bw, bh, 3, COLOR_TEXT_SECONDARY);
+  d.fillRect(bx + bw, by + 4, nubW, bh - 8, COLOR_TEXT_SECONDARY); // terminal nub
   if (level >= 0) {
     int fillW = max(2, (bw - 4) * constrain((int)level, 0, 100) / 100);
     d.fillRoundRect(bx + 2, by + 2, fillW, bh - 4, 2, barColor);
