@@ -2043,20 +2043,31 @@ static void blankScreen() {
   canvas.pushSprite(&M5.Display, 0, 0);
 }
 
-// Darkness comes from blankScreen() painting the framebuffer black, not from
-// the backlight: M5.Display.setBrightness() is a no-op on this hardware and the
-// DCS route is unverified. So the panel is told BRIGHTNESS_MIN rather than 0.
+// The backlight really does go off at 0: M5GFX attaches no Light instance for
+// Tab5, so M5.Display.setBrightness() does nothing and the DCS 0x51 write in
+// panelSetBrightness() is the only control there is. It works -- confirmed on
+// hardware by the panel visibly glowing when this was briefly set to
+// BRIGHTNESS_MIN instead.
 //
-// Writing 0 was a real risk with nothing to gain. The ST7123 is an integrated
-// display AND touch controller -- the same reason enterSleep() below avoids
-// M5.Display.sleep() -- so a command that idles its display block may take the
-// digitiser with it, and a panel that cannot report touch cannot be woken by
-// tapping it. An all-black framebuffer at the minimum level reads as off.
+// That brief detour was an attempt to explain a sleeping screen that would not
+// wake on a tap, on the theory that the ST7123 -- one controller for both the
+// display and the digitiser -- might stop reporting touch with its display
+// block idled. It is a real possibility: M5GFX's own Tab5 timing block warns
+// that shrinking the vertical front porch "will cause the touch panel to stop
+// working". But the same commit also fixed the wake path itself, which needed
+// a press AND a release both seen through a 20ms sampling window, and that is
+// the likelier reason a tap did nothing.
+//
+// So: dark again, with the wake fixes kept. If tapping a sleeping screen stops
+// working, the "touch while dark" line on the serial monitor says which half is
+// at fault -- and the targeted next step is clearing the BL bit in DCS 0x53
+// (ctrl 0x28 rather than 0x2C), which switches the backlight off without
+// touching the brightness value at all.
 static void enterBacklightOff() {
   rememberBrightness();
   backlightOff = true;
-  M5.Display.setBrightness(BRIGHTNESS_MIN);
-  panelSetBrightness(BRIGHTNESS_MIN);
+  M5.Display.setBrightness(0);
+  panelSetBrightness(0);
   blankScreen();
 }
 
@@ -2069,8 +2080,8 @@ static void enterSleep() {
   rememberBrightness();
   asleep = true;
   wifiEnabled = false; // wifiTask tears the AP down and powers the radio off
-  M5.Display.setBrightness(BRIGHTNESS_MIN); // never 0 -- see enterBacklightOff()
-  panelSetBrightness(BRIGHTNESS_MIN);
+  M5.Display.setBrightness(0);
+  panelSetBrightness(0); // see enterBacklightOff() for why this is 0 again
   blankScreen();
 }
 
