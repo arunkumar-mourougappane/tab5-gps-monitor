@@ -750,6 +750,8 @@
     satsUsed: 9,
     locValid: true,
     hdopHistory: [], hdopHead: 0,
+    speedHistory: [], speedHead: 0,
+    fixSecs: [0, 0, 0], // seconds at no fix / 2D / 3D
     tripKm: 0, maxSpeed: 0, ttff: 0, firstFixAt: 0,
     battery: 82, apClients: 1, sdReady: true,
     lastSentenceMs: 0,
@@ -773,6 +775,8 @@
       SIM.hdop = 9.9;
       SIM.tripKm = 0; SIM.maxSpeed = 0; SIM.ttff = 0; SIM.firstFixAt = 0;
       SIM.hdopHistory = []; SIM.hdopHead = 0;
+      SIM.speedHistory = []; SIM.speedHead = 0;
+      SIM.fixSecs = [0, 0, 0];
       SIM.sats.forEach((s) => { s.visible = false; s.snr = -1; });
       SIM.logRing = [];
       SENTENCE_TYPES.forEach((s) => (SIM.counts[s] = 0));
@@ -919,6 +923,10 @@
     s.hdopHistory.push(s.hdop);
     s.hdopHead++;
     if (s.hdopHistory.length > 40) s.hdopHistory.shift();
+    s.speedHistory.push(s.locValid ? s.spd : 0);
+    s.speedHead++;
+    if (s.speedHistory.length > 40) s.speedHistory.shift();
+    s.fixSecs[Math.min(Math.max(s.fixType - 1, 0), 2)] += dtMs / 1000;
 
     if (s.t % 90000 < dtMs && s.battery > 5) s.battery--;
     emitSentences();
@@ -1000,12 +1008,11 @@
 
   // HDOP trend: fixed 0-5 scale, same as the firmware. Drawn in the accuracy
   // block on the live view and full width on the trip view.
-  function sparkSvg(sx, sy, sw, sh) {
-    const hist = SIM.hdopHistory;
+  function sparkSvg(sx, sy, sw, sh, hist, maxVal) {
     let inner = `<rect x="${sx}" y="${sy}" width="${sw}" height="${sh}" fill="${C.bg}"></rect>`;
     if (hist.length > 1) {
       const pts = hist.map((v, i) =>
-        `${(sx + (i / (hist.length - 1)) * sw).toFixed(1)},${(sy + sh - Math.min(v / 5, 1) * sh).toFixed(1)}`
+        `${(sx + (i / (hist.length - 1)) * sw).toFixed(1)},${(sy + sh - Math.min(v / maxVal, 1) * sh).toFixed(1)}`
       ).join(" ");
       inner += `<polyline points="${pts}" fill="none" stroke="${C.acc}" stroke-width="1.5"></polyline>`;
     }
@@ -1036,13 +1043,43 @@
         h += el("abs lbl", at(r.x + colW, y), b[0]) + el("abs val", at(r.x + colW, y + 20), b[1]);
       };
       pair(168, ["DISTANCE", SIM.tripKm.toFixed(2) + " km"], ["MAX SPEED", SIM.maxSpeed.toFixed(1) + " km/h"]);
-      pair(232, ["TRIP TIME", clock], ["AVG SPEED", avg.toFixed(1) + " km/h"]);
+      pair(226, ["TRIP TIME", clock], ["AVG SPEED", avg.toFixed(1) + " km/h"]);
 
-      h += el("abs lbl", at(r.x, 300),
+      h += el("abs lbl", at(r.x, 282),
         SIM.ttff ? `TIME TO FIRST FIX: ${(SIM.ttff / 1000).toFixed(1)}s` : "TIME TO FIRST FIX: --");
-      h += el("abs lbl", at(r.x, 336), "HDOP TREND");
 
-      h += sparkSvg(r.x, 358, r.w, 28);
+      // Speed autoscales to the trip's own maximum -- there is no fixed ceiling
+      // that suits both a walk and a motorway, and MAX SPEED is printed above.
+      h += el("abs lbl", at(r.x, 308), "SPEED");
+      h += sparkSvg(r.x, 328, r.w, 36, SIM.speedHistory, Math.max(10, SIM.maxSpeed));
+
+      // How much of the trip had a usable fix -- the question a logger's output
+      // is only as good as, and one the live view cannot answer.
+      h += el("abs lbl", at(r.x, 378), "FIX QUALITY");
+      const segColor = [C.bad, C.warn, C.good];
+      const segLabel = ["NONE", "2D", "3D"];
+      const total = SIM.fixSecs.reduce((a, b) => a + b, 0);
+      let bar = `<rect x="${r.x}" y="398" width="${r.w}" height="16" rx="8" fill="${C.bg}"></rect>`;
+      if (total > 0) {
+        let segX = r.x;
+        SIM.fixSecs.forEach((n, i) => {
+          const segW = Math.floor((r.w * n) / total);
+          if (segW > 0) bar += `<rect x="${segX}" y="398" width="${segW}" height="16" fill="${segColor[i]}"></rect>`;
+          segX += segW;
+        });
+      }
+      h += `<svg class="abs" style="${at(r.x, 398, `width:${r.w}px;height:16px`)}"
+              viewBox="${r.x} 398 ${r.w} 16" aria-hidden="true">${bar}</svg>`;
+
+      const colStep = Math.floor(r.w / 3);
+      SIM.fixSecs.forEach((n, i) => {
+        const lx = r.x + colStep * i;
+        h += el("abs", at(lx, 426, `width:10px;height:10px;background:${segColor[i]}`));
+        const mm = Math.floor(n / 60), ss = n % 60;
+        h += el("abs f2", at(lx + 16, 422, `color:${n > 0 ? C.t1 : C.none}`),
+          `${segLabel[i]} ${mm}:${String(ss).padStart(2, "0")}`);
+      });
+
       document.getElementById("l-fix").innerHTML = h;
       return;
     }
@@ -1071,7 +1108,7 @@
     h += el("abs qbadge", at(r.x + 14 + hdopStr.length * 13, 428,
       `background:${SIM.locValid ? qColor : C.none}`), SIM.locValid ? qLabel : "NO FIX");
     // HDOP trend, in the space the PDOP/VDOP caption used to hold.
-    h += sparkSvg(r.x, 456, half - 10, 18);
+    h += sparkSvg(r.x, 456, half - 10, 18, SIM.hdopHistory, 5);
 
     const d = SIM.utc;
     h += el("abs lbl", at(r.x + half, 406), "TIME (UTC)");
@@ -1258,7 +1295,7 @@
 
   const sigFix = () => UI.view === "trip"
     ? ["trip", SIM.tripKm.toFixed(2), SIM.maxSpeed.toFixed(1), Math.floor((SIM.t - SIM.firstFixAt) / 1000),
-       SIM.ttff, SIM.hdopHead, SIM.hdop.toFixed(1)].join("|")
+       SIM.ttff, SIM.speedHead, SIM.fixSecs.join(",")].join("|")
     : ["live", SIM.fixType, SIM.satsUsed, visibleSats().length,
        SIM.locValid ? SIM.lat.toFixed(6) : "-", SIM.locValid ? SIM.lon.toFixed(6) : "-",
        Math.round(SIM.alt), SIM.spd.toFixed(1), Math.round(SIM.crs),
@@ -1544,6 +1581,8 @@
   emitSentences();
   for (let i = 0; i < 20; i++) drainPending();
   SIM.hdopHistory = Array.from({ length: 24 }, (_, i) => 3.4 - i * 0.1 + rnd(-0.15, 0.15));
+  SIM.speedHistory = Array.from({ length: 24 }, (_, i) => 20 + i * 1.1 + rnd(-4, 4));
+  SIM.fixSecs = [3, 9, 42];
   relayout();
 
   setInterval(() => {

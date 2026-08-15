@@ -291,6 +291,24 @@ static void pushHdopHistory(float h) {
   if (hdopHistCount < SPARK_LEN) hdopHistCount++;
 }
 
+// Session history for the trip view. The HDOP trend moved to the accuracy
+// block on the live view, where it belongs next to the number it qualifies --
+// so the trip face carries what only a session can answer instead: how the
+// speed went, and how much of the trip actually had a usable fix.
+static float speedHistory[SPARK_LEN] = {0};
+static int speedHistCount = 0;
+static uint32_t speedHistHead = 0;
+
+static void pushSpeedHistory(float kmph) {
+  speedHistory[speedHistHead % SPARK_LEN] = kmph;
+  speedHistHead++;
+  if (speedHistCount < SPARK_LEN) speedHistCount++;
+}
+
+// Seconds spent at each fix mode, indexed by GSA fix type - 1: no fix, 2D, 3D.
+// One fix epoch is one second of receiver time, so these are counts of epochs.
+static uint32_t fixSecs[3] = {0, 0, 0};
+
 // -------------------------------------------------- SD logging / WiFi NMEA --
 // SD_MMC needs no manual pin config: the m5stack_tab5 board variant defines
 // BOARD_HAS_SDMMC/BOARD_SDMMC_SLOT, so SD_MMC.begin() picks them up itself.
@@ -713,6 +731,9 @@ static void gpsTaskFn(void *) {
       if (newEpoch) {
         if (gps.speed.isValid() && gps.speed.kmph() > maxSpeedKmph) maxSpeedKmph = gps.speed.kmph();
         if (gps.hdop.isValid()) pushHdopHistory((float)gps.hdop.hdop());
+        pushSpeedHistory(gps.speed.isValid() ? (float)gps.speed.kmph() : 0.0f);
+        int fixIdx = constrain(gsaFixType - 1, 0, 2);
+        fixSecs[fixIdx]++;
         // Also once per fix rather than once per parsed sentence.
         if (updated) formatFix(fixLine, sizeof(fixLine));
       }
@@ -766,6 +787,10 @@ struct RenderSnapshot {
   float hdopHistory[SPARK_LEN];
   int hdopHistCount;
   uint32_t hdopHistHead;
+  float speedHistory[SPARK_LEN];
+  int speedHistCount;
+  uint32_t speedHistHead;
+  uint32_t fixSecs[3];
 
   SatInfo sats[MAX_SATS];
 
@@ -809,6 +834,10 @@ static void captureSnapshot(RenderSnapshot &s) {
   memcpy(s.hdopHistory, hdopHistory, sizeof(hdopHistory));
   s.hdopHistCount = hdopHistCount;
   s.hdopHistHead = hdopHistHead;
+  memcpy(s.speedHistory, speedHistory, sizeof(speedHistory));
+  s.speedHistCount = speedHistCount;
+  s.speedHistHead = speedHistHead;
+  memcpy(s.fixSecs, fixSecs, sizeof(fixSecs));
 
   memcpy(s.sats, satTable, sizeof(satTable)); // POD: no per-element String copies
   s.visibleSats = countVisibleSats(s.sats);
@@ -1482,12 +1511,57 @@ static int drawTripView(int x, int y, int w, const RenderSnapshot &s) {
   d.print(ttffBuf);
   y += d.fontHeight() + 10;
 
+  // Speed over the session. Autoscaled to the trip's own maximum rather than a
+  // fixed ceiling -- unlike HDOP, there is no absolute scale that suits both a
+  // walk and a motorway, and MAX SPEED is printed directly above, so the top of
+  // the trace is already labelled.
+  float speedScale = max(10.0f, (float)s.maxSpeedKmph);
   d.setCursor(x, y);
-  d.print("HDOP TREND");
+  d.print("SPEED");
   y += d.fontHeight() + 4;
-  int sparkH = 28;
-  drawSparkline(x, y, w, sparkH, s.hdopHistory, s.hdopHistCount, s.hdopHistHead, COLOR_ACCENT, 5.0f);
-  y += sparkH;
+  int sparkH = 36;
+  drawSparkline(x, y, w, sparkH, s.speedHistory, s.speedHistCount, s.speedHistHead, COLOR_ACCENT, speedScale);
+  y += sparkH + 14;
+
+  // How much of the trip actually had a usable fix. For a logger this is the
+  // question the recording is only as good as, and nothing on the live view
+  // can answer it -- that shows the fix you have now, not the one you had for
+  // the last twenty minutes.
+  d.setTextColor(COLOR_TEXT_SECONDARY, COLOR_CARD_BG);
+  d.setCursor(x, y);
+  d.print("FIX QUALITY");
+  y += d.fontHeight() + 4;
+
+  uint32_t total = s.fixSecs[0] + s.fixSecs[1] + s.fixSecs[2];
+  int barH = 16;
+  d.fillRoundRect(x, y, w, barH, barH / 2, COLOR_BG);
+  if (total > 0) {
+    // Painted worst-first so the eye lands on the good segment's length.
+    const uint16_t segColor[3] = {COLOR_STATUS_BAD, COLOR_STATUS_WARN, COLOR_STATUS_GOOD};
+    int segX = x;
+    for (int i = 0; i < 3; i++) {
+      int segW = (int)((uint64_t)w * s.fixSecs[i] / total);
+      if (segW > 0) d.fillRect(segX, y, segW, barH, segColor[i]);
+      segX += segW;
+    }
+  }
+  y += barH + 8;
+
+  // Legend doubles as the readout: colour plus the actual time at each mode.
+  const char *segLabel[3] = {"NONE", "2D", "3D"};
+  const uint16_t segColor[3] = {COLOR_STATUS_BAD, COLOR_STATUS_WARN, COLOR_STATUS_GOOD};
+  int colStep = w / 3;
+  for (int i = 0; i < 3; i++) {
+    int lx = x + colStep * i;
+    d.fillRect(lx, y + 4, 10, 10, segColor[i]);
+    char buf[24];
+    uint32_t secs = s.fixSecs[i];
+    snprintf(buf, sizeof(buf), "%s %u:%02u", segLabel[i], (unsigned)(secs / 60), (unsigned)(secs % 60));
+    d.setTextColor(secs > 0 ? COLOR_TEXT_PRIMARY : COLOR_STATUS_NONE, COLOR_CARD_BG);
+    d.setCursor(lx + 16, y);
+    d.print(buf);
+  }
+  y += d.fontHeight() + 2;
   return y;
 }
 
@@ -1815,7 +1889,8 @@ static uint32_t sigFixPanel(const RenderSnapshot &s) {
     h = hashVal(h, s.tripDistanceKm);
     h = hashVal(h, s.maxSpeedKmph);
     h = hashVal(h, s.timeToFirstFixMs);
-    h = hashVal(h, s.hdopHistHead);
+    h = hashVal(h, s.speedHistHead); // the trend the trip face draws now
+    for (int i = 0; i < 3; i++) h = hashVal(h, s.fixSecs[i]);
     // The trip clock ticks visibly, so fold in whole elapsed seconds.
     uint32_t elapsedSec = s.firstFixAbsMs ? (millis() - s.firstFixAbsMs) / 1000 : 0;
     h = hashVal(h, elapsedSec);
