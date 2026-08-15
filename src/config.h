@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 
 static constexpr int GPS_RX_PIN = 54; // Tab5 RX <- GPS TX (White)
 static constexpr int GPS_TX_PIN = 53; // Tab5 TX -> GPS RX (Yellow)

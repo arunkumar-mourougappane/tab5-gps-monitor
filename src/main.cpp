@@ -41,14 +41,10 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
-#include <freertos/queue.h>
-#include <SD_MMC.h>
 #include "config.h"
 #include "display.h"
-
-#if ENABLE_WIFI_NMEA
-#include <WiFi.h>
-#endif
+#include "sd_logger.h"
+#include "wifi_nmea.h"
 
 HardwareSerial GPSSerial(1);
 TinyGPSPlus gps;
@@ -68,131 +64,6 @@ static int radarBgSize = 0;
 
 #include "gps_model.h"
 #include "trip_stats.h"
-// -------------------------------------------------- SD logging / WiFi NMEA --
-// SD_MMC needs no manual pin config: the m5stack_tab5 board variant defines
-// BOARD_HAS_SDMMC/BOARD_SDMMC_SLOT, so SD_MMC.begin() picks them up itself.
-// Raw NMEA is broadcast over a small TCP server (port 10110, the de facto
-// standard NMEA-over-TCP port used by tools like OpenCPN) so the stream can
-// be viewed from a laptop without a serial cable. gpsTask never talks to the
-// network directly -- it only pushes lines into a queue, so a stalled TCP
-// client can never block UART draining.
-
-static bool sdReady = false;
-static File nmeaLogFile;
-static File trackLogFile;
-static uint32_t sdFlushCounter = 0;
-
-static int nextSdSessionIndex() {
-  int idx = 1;
-  File f = SD_MMC.open("/session.txt", FILE_READ);
-  if (f) {
-    idx = f.parseInt() + 1;
-    f.close();
-  }
-  File fw = SD_MMC.open("/session.txt", FILE_WRITE);
-  if (fw) {
-    fw.print(idx);
-    fw.close();
-  }
-  return idx;
-}
-
-static void initSdLogging() {
-  if (!SD_MMC.begin()) {
-    Serial.println("SD_MMC mount failed -- SD logging disabled (no card, or unsupported card)");
-    return;
-  }
-  int idx = nextSdSessionIndex();
-  char nmeaPath[32], trackPath[32];
-  snprintf(nmeaPath, sizeof(nmeaPath), "/gps_%04d.nmea", idx);
-  snprintf(trackPath, sizeof(trackPath), "/track_%04d.csv", idx);
-
-  nmeaLogFile = SD_MMC.open(nmeaPath, FILE_WRITE);
-  trackLogFile = SD_MMC.open(trackPath, FILE_WRITE);
-  if (trackLogFile) trackLogFile.println("utc,lat,lon,alt_m,speed_kmph,course_deg,hdop,sats_used");
-
-  sdReady = (bool)nmeaLogFile && (bool)trackLogFile;
-  Serial.printf("SD logging %s -- %s / %s\n", sdReady ? "enabled" : "FAILED to open log files", nmeaPath, trackPath);
-}
-
-#if ENABLE_WIFI_NMEA
-static constexpr char WIFI_AP_SSID[] = "Tab5-GPS";
-static constexpr char WIFI_AP_PASS[] = "gpstest123"; // WPA2 requires >=8 chars
-static constexpr uint16_t NMEA_TCP_PORT = 10110; // conventional NMEA-over-TCP port
-
-struct NmeaQueueMsg { char text[96]; };
-static QueueHandle_t nmeaQueue;
-static WiFiServer nmeaServer(NMEA_TCP_PORT);
-static WiFiClient nmeaClients[4];
-static volatile int nmeaClientCount = 0;
-
-// Cleared when the device sleeps so the radio can be powered down; the task
-// owns the actual bring-up/tear-down so the UI thread never blocks on WiFi.
-static volatile bool wifiEnabled = true;
-
-static void wifiTaskFn(void *) {
-  bool apUp = false;
-
-  for (;;) {
-    if (wifiEnabled && !apUp) {
-      WiFi.mode(WIFI_AP);
-      WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS);
-      nmeaServer.begin();
-      apUp = true;
-      Serial.printf("WiFi AP '%s' up -- connect to %s:%u for raw NMEA (TCP)\n", WIFI_AP_SSID,
-                    WiFi.softAPIP().toString().c_str(), NMEA_TCP_PORT);
-    } else if (!wifiEnabled && apUp) {
-      for (auto &c : nmeaClients) {
-        if (c.connected()) c.stop();
-      }
-      nmeaServer.end();
-      WiFi.softAPdisconnect(true); // true also powers the radio down
-      WiFi.mode(WIFI_OFF);
-      nmeaClientCount = 0;
-      apUp = false;
-      Serial.println("WiFi AP down (device asleep)");
-    }
-
-    if (apUp) {
-      if (nmeaServer.hasClient()) {
-        WiFiClient newClient = nmeaServer.accept();
-        bool placed = false;
-        for (auto &c : nmeaClients) {
-          if (!c.connected()) {
-            c = newClient;
-            placed = true;
-            break;
-          }
-        }
-        if (!placed) newClient.stop(); // pool full
-      }
-
-      NmeaQueueMsg msg;
-      while (xQueueReceive(nmeaQueue, &msg, 0) == pdTRUE) {
-        for (auto &c : nmeaClients) {
-          if (c.connected()) {
-            c.print(msg.text);
-            c.print("\r\n");
-          }
-        }
-      }
-
-      int cnt = 0;
-      for (auto &c : nmeaClients) if (c.connected()) cnt++;
-      nmeaClientCount = cnt;
-    } else {
-      // Keep draining while the radio is down, otherwise the queue sits full
-      // and gpsTask's non-blocking sends all fail until wake.
-      NmeaQueueMsg msg;
-      while (xQueueReceive(nmeaQueue, &msg, 0) == pdTRUE) {
-      }
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(20));
-  }
-}
-#endif
-
 // ------------------------------------------------------- NMEA line parsing --
 // All of this only ever runs inside gpsTask, holding stateMutex.
 
@@ -299,21 +170,9 @@ static Rect nmeaFilterHitRect() {
 // holding stateMutex -- an SD write is the slowest thing in the ingest path,
 // and nothing on the render side can see either sink.
 static void logSentence(const char *line) {
-  if (sdReady) {
-    nmeaLogFile.print(line);
-    nmeaLogFile.print("\n");
-    if (++sdFlushCounter >= 20) { // periodic flush balances durability vs. flash wear
-      nmeaLogFile.flush();
-      sdFlushCounter = 0;
-    }
-  }
-
+  logToSD(line);
 #if ENABLE_WIFI_NMEA
-  if (nmeaQueue) {
-    NmeaQueueMsg msg;
-    strlcpy(msg.text, line, sizeof(msg.text));
-    xQueueSend(nmeaQueue, &msg, 0); // non-blocking: drop rather than ever stall gpsTask
-  }
+  enqueueNmea(line);
 #endif
 }
 
@@ -500,10 +359,7 @@ static void gpsTaskFn(void *) {
 
       // Both of these are slow, and neither is shared -- so they happen with
       // the lock already released.
-      if (trackRow[0] != '\0') {
-        trackLogFile.print(trackRow);
-        trackLogFile.flush(); // one row per fix -- safe to flush every write
-      }
+      if (trackRow[0] != '\0') writeTrackRow(trackRow);
       if (fixLine[0] != '\0') Serial.println(fixLine);
     }
 
@@ -1926,13 +1782,13 @@ void setup() {
 
   stateMutex = xSemaphoreCreateMutex();
 #if ENABLE_WIFI_NMEA
-  nmeaQueue = xQueueCreate(64, sizeof(NmeaQueueMsg));
+  initWifiQueue();
 #endif
   int mainCore = xPortGetCoreID();
   int gpsCore = mainCore == 0 ? 1 : 0;
   xTaskCreatePinnedToCore(gpsTaskFn, "gps_task", 4096, nullptr, 2, nullptr, gpsCore);
 #if ENABLE_WIFI_NMEA
-  xTaskCreatePinnedToCore(wifiTaskFn, "wifi_task", 4096, nullptr, 1, nullptr, tskNO_AFFINITY);
+  startWifiTask();
 #endif
 }
 
