@@ -44,9 +44,12 @@ jobs:
         run: pio run -j 1
 
       - name: Stage release assets
+        # This target's build already merges the bootloader, partition table
+        # and app image into one flashable firmware.bin (see the "Creating
+        # ESP32P4 image" build step) -- unlike other M5Stack/ESP32 targets,
+        # there's no separate firmware.factory.bin to also stage here.
         run: |
           cp .pio/build/tab5/firmware.bin "tab5-gps-monitor-${{ github.ref_name }}.bin"
-          cp .pio/build/tab5/firmware.factory.bin "tab5-gps-monitor-${{ github.ref_name }}.factory.bin"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -54,4 +57,3 @@ jobs:
           body_path: RELEASE_NOTES.md
           files: |
             tab5-gps-monitor-${{ github.ref_name }}.bin
-            tab5-gps-monitor-${{ github.ref_name }}.factory.bin
