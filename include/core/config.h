@@ -5,7 +5,7 @@
 // RELEASE_NOTES.md and before tagging -- kept in sync with the git tag by
 // convention (there's no automated check tying the two together), so a
 // release isn't done until both agree.
-static constexpr char FIRMWARE_VERSION[] = "1.0.0";
+static constexpr char FIRMWARE_VERSION[] = "1.1.0";
 
 static constexpr int GPS_RX_PIN = 54; // Tab5 RX <- GPS TX (White)
 static constexpr int GPS_TX_PIN = 53; // Tab5 TX -> GPS RX (Yellow)
