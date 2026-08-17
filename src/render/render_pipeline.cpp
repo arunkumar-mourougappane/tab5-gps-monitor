@@ -53,6 +53,11 @@ static uint32_t sigStatusBar(const RenderSnapshot &s) {
 #if ENABLE_WIFI_NMEA
   int clients = nmeaClientCount;
   h = hashVal(h, clients);
+  bool apUp = wifiEnabled; // copy out of volatile before hashing -- hashVal()
+                            // reinterpret_casts, which can't cast away volatile
+  h = hashVal(h, apUp); // AP OFF vs. a live client count is a repaint
+  bool pressAp = pressTarget == PressTarget::AP;
+  h = hashVal(h, pressAp);
 #endif
   bool pressLight = pressTarget == PressTarget::LIGHT;
   bool pressSleep = pressTarget == PressTarget::SLEEP;

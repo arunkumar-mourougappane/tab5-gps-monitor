@@ -11,6 +11,8 @@
 #include "ui/ui_log_panel.h"
 #include "ui/ui_fix_panel.h"
 #include "ui/ui_sky_panel.h"
+#include "ui/ui_wifi_panel.h"
+#include "io/wifi_nmea.h"
 #include "model/nmea_parser.h"
 #include "model/render_snapshot.h"
 #include "render/render_pipeline.h"
@@ -28,9 +30,19 @@ static PressTarget hitTestChips(int x, int y) {
     if (pointInRect(x, y, dimmerDoneRect())) return PressTarget::DIM_DONE;
     return PressTarget::NONE;
   }
+#if ENABLE_WIFI_NMEA
+  if (apOpen) {
+    if (pointInRect(x, y, wifiToggleRect())) return PressTarget::AP_TOGGLE;
+    if (pointInRect(x, y, wifiDoneRect())) return PressTarget::AP_DONE;
+    return PressTarget::NONE;
+  }
+#endif
   if (pointInRect(x, y, lightHitRect())) return PressTarget::LIGHT;
   if (pointInRect(x, y, sleepHitRect())) return PressTarget::SLEEP;
   if (pointInRect(x, y, nmeaFilterHitRect())) return PressTarget::FILTER;
+#if ENABLE_WIFI_NMEA
+  if (pointInRect(x, y, apBadgeHitRect())) return PressTarget::AP;
+#endif
   return PressTarget::NONE;
 }
 
@@ -139,6 +151,37 @@ bool handleTouch(bool &wantFix, bool &wantSat, bool &wantLog, bool &pressChanged
     return false;
   }
 
+#if ENABLE_WIFI_NMEA
+  // The AP overlay is modal too, same shape as the brightness one above --
+  // no drag to handle, so it's the simpler of the two.
+  if (apOpen) {
+    if (pressChanged) apDirty = true;
+
+    if (released) {
+      PressTarget hit = capturedTarget;
+      capturedTarget = PressTarget::NONE;
+      if (hit == PressTarget::AP_TOGGLE) {
+        wifiUserDisabled = !wifiUserDisabled;
+        applyWifiEnabled();
+        apDirty = true;
+      } else if (hit == PressTarget::AP_DONE || !pointInRect(touchDownX, touchDownY, wifiPanelRect())) {
+        apOpen = false;
+        relayout(); // repaint whatever the overlay was covering
+        return false;
+      }
+    }
+
+    if (apDirty) {
+      apDirty = false;
+      drawWifiPanel();
+      dirtyCount = 0;
+      markDirty(wifiPanelRect());
+      pushDirty(false);
+    }
+    return false;
+  }
+#endif
+
   // Each branch marks only the panel(s) it actually affects. A satellite tap
   // only needs the sat panel redrawn; the fix/log cards are untouched by it.
   // A view/expand toggle calls relayout(), which repaints the whole canvas'
@@ -164,6 +207,12 @@ bool handleTouch(bool &wantFix, bool &wantSat, bool &wantLog, bool &pressChanged
     } else if (chip == PressTarget::SLEEP) {
       enterSleep();
       return false;
+#if ENABLE_WIFI_NMEA
+    } else if (chip == PressTarget::AP) {
+      apOpen = true;
+      apDirty = true;
+      return false; // the modal block draws it on the next pass
+#endif
     } else if (hit >= 0) {
       setSatTooltip(hit);
       wantSat = true;

@@ -45,6 +45,7 @@
 #include "model/render_snapshot.h" // stateMutex
 #include "ui/ui_chrome.h"      // drawStaticChrome()
 #include "ui/ui_sky_panel.h"   // buildRadarSprite()
+#include "ui/ui_wifi_panel.h"  // initWifiPanel()
 #include "input/app_input.h"      // handleTouch()
 #include "render/render_pipeline.h" // runRenderCycle()
 
@@ -89,6 +90,7 @@ void setup() {
   stateMutex = xSemaphoreCreateMutex();
 #if ENABLE_WIFI_NMEA
   initWifiQueue();
+  initWifiPanel(); // encodes the QR join code once -- the payload is fixed
 #endif
   startGpsTask();
 #if ENABLE_WIFI_NMEA
