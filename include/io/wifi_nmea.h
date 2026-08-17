@@ -16,6 +16,13 @@ extern volatile int nmeaClientCount;
 // owns the actual bring-up/tear-down so the UI thread never blocks on WiFi.
 extern volatile bool wifiEnabled;
 
+// Exposed for the AP QR overlay (ui/ui_wifi_panel.cpp), which needs to show
+// what it's advertising -- these stay the single source of truth used to
+// actually bring the AP up in wifiTaskFn().
+extern const char WIFI_AP_SSID[];
+extern const char WIFI_AP_PASS[];
+static constexpr uint16_t NMEA_TCP_PORT = 10110; // conventional NMEA-over-TCP port
+
 void initWifiQueue();     // call once from setup(), before startWifiTask()
 void startWifiTask();     // spawns wifiTaskFn
 

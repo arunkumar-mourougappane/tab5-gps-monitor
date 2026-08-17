@@ -18,3 +18,7 @@ static constexpr uint16_t COLOR_STATUS_GOOD = rgb565(84, 214, 140);
 static constexpr uint16_t COLOR_STATUS_WARN = rgb565(232, 188, 74);
 static constexpr uint16_t COLOR_STATUS_BAD = rgb565(232, 92, 92);
 static constexpr uint16_t COLOR_STATUS_NONE = rgb565(90, 96, 112);
+// True white: QR codes need real light-on-dark contrast to scan reliably,
+// not a themed near-white -- the only place this panel departs from its
+// own palette on purpose.
+static constexpr uint16_t COLOR_WHITE = rgb565(255, 255, 255);

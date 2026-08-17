@@ -7,9 +7,8 @@
 #include <freertos/task.h>
 #include <freertos/queue.h>
 
-static constexpr char WIFI_AP_SSID[] = "Tab5-GPS";
-static constexpr char WIFI_AP_PASS[] = "gpstest123"; // WPA2 requires >=8 chars
-static constexpr uint16_t NMEA_TCP_PORT = 10110; // conventional NMEA-over-TCP port
+const char WIFI_AP_SSID[] = "Tab5-GPS";
+const char WIFI_AP_PASS[] = "gpstest123"; // WPA2 requires >=8 chars
 
 struct NmeaQueueMsg { char text[96]; };
 static QueueHandle_t nmeaQueue;
