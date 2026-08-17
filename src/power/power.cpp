@@ -85,7 +85,7 @@ void enterSleep() {
   rememberBrightness();
   asleep = true;
 #if ENABLE_WIFI_NMEA
-  wifiEnabled = false; // wifiTask tears the AP down and powers the radio off
+  applyWifiEnabled(); // wifiTask tears the AP down and powers the radio off
 #endif
   M5.Display.setBrightness(0);
   panelSetBrightness(0); // see enterBacklightOff() for why this is 0 again
@@ -94,10 +94,11 @@ void enterSleep() {
 
 void wakeDisplay() {
   if (asleep) {
-#if ENABLE_WIFI_NMEA
-    wifiEnabled = true; // wifiTask brings the AP back up
-#endif
     asleep = false;
+#if ENABLE_WIFI_NMEA
+    applyWifiEnabled(); // wifiTask brings the AP back up, unless the user
+                         // had it manually disabled before sleeping
+#endif
   }
   backlightOff = false;
   M5.Display.setBrightness(savedBrightness);

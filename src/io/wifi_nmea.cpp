@@ -6,6 +6,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
+#include "power/power.h"
 
 const char WIFI_AP_SSID[] = "Tab5-GPS";
 const char WIFI_AP_PASS[] = "gpstest123"; // WPA2 requires >=8 chars
@@ -16,6 +17,11 @@ static WiFiServer nmeaServer(NMEA_TCP_PORT);
 static WiFiClient nmeaClients[4];
 volatile int nmeaClientCount = 0;
 volatile bool wifiEnabled = true;
+volatile bool wifiUserDisabled = false;
+
+void applyWifiEnabled() {
+  wifiEnabled = !asleep && !wifiUserDisabled;
+}
 
 void initWifiQueue() {
   nmeaQueue = xQueueCreate(64, sizeof(NmeaQueueMsg));

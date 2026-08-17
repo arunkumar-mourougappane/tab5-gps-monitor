@@ -16,6 +16,19 @@ extern volatile int nmeaClientCount;
 // owns the actual bring-up/tear-down so the UI thread never blocks on WiFi.
 extern volatile bool wifiEnabled;
 
+// The AP overlay's manual toggle, independent of sleep -- see
+// applyWifiEnabled()'s comment for how the two combine.
+extern volatile bool wifiUserDisabled;
+
+// wifiEnabled = !asleep && !wifiUserDisabled. Note backlightOff deliberately
+// stays out of this: enterBacklightOff() has never torn the AP down, only
+// full enterSleep() does, and this preserves that distinction. Call after
+// changing either input -- power.cpp calls it from enterSleep()/
+// wakeDisplay(), and the overlay's toggle chip calls it after flipping
+// wifiUserDisabled -- so wifiEnabled is never written directly from two
+// places with two different ideas of what it should be.
+void applyWifiEnabled();
+
 // Exposed for the AP QR overlay (ui/ui_wifi_panel.cpp), which needs to show
 // what it's advertising -- these stay the single source of truth used to
 // actually bring the AP up in wifiTaskFn().
