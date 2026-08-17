@@ -155,6 +155,20 @@ bool handleTouch(bool &wantFix, bool &wantSat, bool &wantLog, bool &pressChanged
   // The AP overlay is modal too, same shape as the brightness one above --
   // no drag to handle, so it's the simpler of the two.
   if (apOpen) {
+    // wifiTaskFn (its own FreeRTOS task) updates nmeaClientCount as clients
+    // connect and disconnect, independent of any touch -- and unlike the
+    // status bar's own AP badge, this modal isn't on runRenderCycle()'s poll
+    // (handleTouch() returns false for the whole time it's open, same as
+    // the dimmer, so loop() never reaches runRenderCycle() to notice). Poll
+    // it by hand here, the one field on this panel that changes without a
+    // tap causing it.
+    static int lastApClients = -1;
+    int curApClients = wifiEnabled ? nmeaClientCount : 0;
+    if (curApClients != lastApClients) {
+      lastApClients = curApClients;
+      apDirty = true;
+    }
+
     if (pressChanged) apDirty = true;
 
     if (released) {
