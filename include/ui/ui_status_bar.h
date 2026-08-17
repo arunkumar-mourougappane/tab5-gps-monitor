@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "core/config.h"
 #include "core/layout.h"
 
 // ------------------------------------------------------------ ui status bar --
@@ -37,6 +38,16 @@ Rect sleepBtnRect();
 // fingertip covers roughly 40px on this panel and these chips are 36 tall.
 Rect lightHitRect();
 Rect sleepHitRect();
+
+#if ENABLE_WIFI_NMEA
+// Unlike LIGHT/SLEEP, the AP badge has no fixed position: it's the rightmost
+// pill in a row that chains leftward and resizes with its neighbours' label
+// widths (battery %, SD/NO SD). drawStatusPill() already computes its
+// x-position while chaining the row; apBadgeRect() returns what the last
+// draw call placed it at, the same way lightBtnRect() returns a constant.
+Rect apBadgeRect();
+Rect apBadgeHitRect();
+#endif
 
 // Exposed so sigStatusBar() (render_pipeline) can hash the same cached values
 // drawStatusPill() draws from, without a second I2C poll.

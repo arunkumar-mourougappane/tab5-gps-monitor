@@ -24,9 +24,16 @@ Rect sleepHitRect() {
   return {c.x - 5, 0, c.w + 10, TOPBAR_H};
 }
 
+#if ENABLE_WIFI_NMEA
+// Captured by drawStatusPill() each time it places the AP pill -- see
+// apBadgeRect()'s header comment for why this is computed rather than const.
+static Rect apBadgeRect_ = {0, 0, 0, 0};
+#endif
+
 // Right-aligned "dot + label" pill, returning its left edge so callers can
-// chain the next badge leftward from it.
-static int drawDotBadge(int rightEdgeX, int py, const char *text, uint16_t dotColor) {
+// chain the next badge leftward from it. `pressed` swaps the fill/text pair
+// the same way drawChip() does, for badges that are also touch targets.
+static int drawDotBadge(int rightEdgeX, int py, const char *text, uint16_t dotColor, bool pressed = false) {
   auto &d = canvas;
   d.setFont(BADGE_FONT);
   d.setTextSize(1);
@@ -36,9 +43,11 @@ static int drawDotBadge(int rightEdgeX, int py, const char *text, uint16_t dotCo
   int pillW = textX + d.textWidth(text) + BADGE_PAD_R;
   int px = rightEdgeX - pillW;
 
-  d.fillRoundRect(px, py, pillW, BADGE_H, BADGE_H / 2, COLOR_CARD_BG);
+  uint16_t fill = pressed ? COLOR_ACCENT : COLOR_CARD_BG;
+  uint16_t textColor = pressed ? COLOR_BG : COLOR_TEXT_PRIMARY;
+  d.fillRoundRect(px, py, pillW, BADGE_H, BADGE_H / 2, fill);
   d.fillCircle(px + BADGE_PAD_L + BADGE_DOT_R, py + BADGE_H / 2, BADGE_DOT_R, dotColor);
-  d.setTextColor(COLOR_TEXT_PRIMARY, COLOR_CARD_BG);
+  d.setTextColor(textColor, fill);
   d.setCursor(px + textX, py + (BADGE_H - d.fontHeight()) / 2);
   d.print(text);
   return px;
@@ -126,10 +135,23 @@ void drawStatusPill(uint32_t snapLastSentenceMs) {
   int bpx = drawBatteryBadge(px - BADGE_GAP, py);
 #if ENABLE_WIFI_NMEA
   char apBuf[12];
-  snprintf(apBuf, sizeof(apBuf), "AP %d", nmeaClientCount);
-  bpx = drawDotBadge(bpx - BADGE_GAP, py, apBuf,
-                     nmeaClientCount > 0 ? COLOR_STATUS_GOOD : COLOR_TEXT_SECONDARY);
+  const char *apLabel = wifiEnabled ? apBuf : "AP OFF";
+  if (wifiEnabled) snprintf(apBuf, sizeof(apBuf), "AP %d", nmeaClientCount);
+  uint16_t apDot = !wifiEnabled ? COLOR_STATUS_NONE
+                  : nmeaClientCount > 0 ? COLOR_STATUS_GOOD : COLOR_TEXT_SECONDARY;
+  int apLeft = drawDotBadge(bpx - BADGE_GAP, py, apLabel, apDot, pressTarget == PressTarget::AP);
+  apBadgeRect_ = {apLeft, py, (bpx - BADGE_GAP) - apLeft, BADGE_H};
+  bpx = apLeft;
 #endif
   drawDotBadge(bpx - BADGE_GAP, py, sdReady ? "SD" : "NO SD",
                sdReady ? COLOR_STATUS_GOOD : COLOR_STATUS_NONE);
 }
+
+#if ENABLE_WIFI_NMEA
+Rect apBadgeRect() { return apBadgeRect_; }
+
+Rect apBadgeHitRect() {
+  Rect r = apBadgeRect_;
+  return {r.x - 6, r.y - 4, r.w + 12, r.h + 8};
+}
+#endif
