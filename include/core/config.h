@@ -1,6 +1,12 @@
 #pragma once
 #include <cstdint>
 
+// Bumped by scripts/bump-version.sh as part of cutting a release, alongside
+// RELEASE_NOTES.md and before tagging -- kept in sync with the git tag by
+// convention (there's no automated check tying the two together), so a
+// release isn't done until both agree.
+static constexpr char FIRMWARE_VERSION[] = "1.0.0";
+
 static constexpr int GPS_RX_PIN = 54; // Tab5 RX <- GPS TX (White)
 static constexpr int GPS_TX_PIN = 53; // Tab5 TX -> GPS RX (Yellow)
 static constexpr uint32_t GPS_BAUD = 115200; // GPS/BDS Unit v1.1 default

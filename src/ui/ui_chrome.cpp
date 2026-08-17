@@ -3,6 +3,7 @@
 #include "core/theme.h"
 #include "core/layout.h"
 #include "ui/ui_widgets.h"
+#include "ui/ui_status_bar.h" // TOPBAR_CTRL_X, where the LIGHT chip starts
 
 // Forward-declared rather than included from ui_log_panel.h / ui_fix_panel.h:
 // those modules don't exist as separate translation units yet -- PositionView
@@ -35,4 +36,8 @@ void drawStaticChrome() {
                 COLOR_ACCENT_GREEN);
 
   drawFilterChip(); // sits in the log card header, at its right end
+}
+
+Rect titleHitRect() {
+  return {0, 0, TOPBAR_CTRL_X, TOPBAR_H};
 }

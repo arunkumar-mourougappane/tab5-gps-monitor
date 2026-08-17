@@ -13,6 +13,8 @@
 #include "ui/ui_sky_panel.h"
 #include "ui/ui_wifi_panel.h"
 #include "io/wifi_nmea.h"
+#include "ui/ui_chrome.h"
+#include "ui/ui_easter_egg.h"
 #include "model/nmea_parser.h"
 #include "model/render_snapshot.h"
 #include "render/render_pipeline.h"
@@ -23,6 +25,12 @@
 // lit the highlight and then did nothing at all, which reads as a button that
 // only works sometimes.
 static PressTarget capturedTarget = PressTarget::NONE;
+
+// Developer easter egg: seven taps on the title within three seconds.
+// Counted here rather than through capturedTarget -- see titleHitRect()'s
+// own comment for why it isn't a real chip.
+static int titleTapCount = 0;
+static uint32_t lastTitleTapMs = 0;
 
 static PressTarget hitTestChips(int x, int y) {
   if (dimmerOpen) {
@@ -201,6 +209,26 @@ bool handleTouch(bool &wantFix, bool &wantSat, bool &wantLog, bool &pressChanged
   }
 #endif
 
+  // The easter egg closes on any tap, unlike the other modals -- there's
+  // nothing on it to choose between, so a DONE chip would just be one more
+  // thing standing between the gag and getting back to the real panel.
+  if (eggOpen) {
+    eggAdvance(); // runs the acquire sequence / twinkle -- see its own comment
+    if (released) {
+      eggOpen = false;
+      relayout(); // repaint whatever it was covering
+      return false;
+    }
+    if (eggDirty) {
+      eggDirty = false;
+      drawEasterEgg();
+      dirtyCount = 0;
+      markDirty(eggPanelRect());
+      pushDirty(false);
+    }
+    return false;
+  }
+
   // Each branch marks only the panel(s) it actually affects. A satellite tap
   // only needs the sat panel redrawn; the fix/log cards are untouched by it.
   // A view/expand toggle calls relayout(), which repaints the whole canvas'
@@ -232,6 +260,26 @@ bool handleTouch(bool &wantFix, bool &wantSat, bool &wantLog, bool &pressChanged
       apDirty = true;
       return false; // the modal block draws it on the next pass
 #endif
+    } else if (pointInRect(tx, ty, titleHitRect())) {
+      // Not run through capturedTarget/pressTarget like the real chips --
+      // deliberately: a visible press highlight on the title would give
+      // away that it's counting something, which defeats the point of it
+      // being a secret. Seven taps within three seconds; a gap longer than
+      // that restarts the count rather than accumulating across it, so an
+      // idle 7th tap minutes after the 6th doesn't suddenly trigger it.
+      uint32_t now = millis();
+      if (now - lastTitleTapMs > 3000) titleTapCount = 0;
+      lastTitleTapMs = now;
+      if (++titleTapCount >= 7) {
+        titleTapCount = 0;
+        eggOpen = true;
+        eggDirty = true;
+        eggReset(); // fresh acquire sequence each time it's opened
+        Serial.println("easter egg: 7 taps registered, opening");
+        return false; // the modal block draws it on the next pass
+      } else {
+        Serial.printf("easter egg: title tap %d/7\n", titleTapCount);
+      }
     } else if (hit >= 0) {
       setSatTooltip(hit);
       wantSat = true;

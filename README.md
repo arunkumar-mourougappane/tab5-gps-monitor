@@ -1,4 +1,4 @@
-# tab5-gps-monitor
+# Tab5 GPS Monitor
 
 [![PlatformIO CI](https://github.com/arunkumar-mourougappane/tab5-gps-monitor/actions/workflows/build.yml/badge.svg)](https://github.com/arunkumar-mourougappane/tab5-gps-monitor/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/arunkumar-mourougappane/tab5-gps-monitor?include_prereleases&sort=semver)](https://github.com/arunkumar-mourougappane/tab5-gps-monitor/releases)
