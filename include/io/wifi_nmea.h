@@ -36,6 +36,14 @@ extern const char WIFI_AP_SSID[];
 extern const char WIFI_AP_PASS[];
 static constexpr uint16_t NMEA_TCP_PORT = 10110; // conventional NMEA-over-TCP port
 
+// True once wifiTaskFn has actually called WiFi.softAP() and it's up --
+// distinct from wifiEnabled, which is the *request* and goes true well
+// before the task (on its own 20ms tick) has acted on it. WiFi.softAPIP()
+// reads 0.0.0.0 until this is true; the overlay must gate on this, not on
+// wifiEnabled, or it can show a request that hasn't been fulfilled yet as
+// if it already had been.
+extern volatile bool wifiApUp;
+
 void initWifiQueue();     // call once from setup(), before startWifiTask()
 void startWifiTask();     // spawns wifiTaskFn
 

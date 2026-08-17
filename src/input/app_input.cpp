@@ -155,16 +155,21 @@ bool handleTouch(bool &wantFix, bool &wantSat, bool &wantLog, bool &pressChanged
   // The AP overlay is modal too, same shape as the brightness one above --
   // no drag to handle, so it's the simpler of the two.
   if (apOpen) {
-    // wifiTaskFn (its own FreeRTOS task) updates nmeaClientCount as clients
-    // connect and disconnect, independent of any touch -- and unlike the
-    // status bar's own AP badge, this modal isn't on runRenderCycle()'s poll
-    // (handleTouch() returns false for the whole time it's open, same as
-    // the dimmer, so loop() never reaches runRenderCycle() to notice). Poll
-    // it by hand here, the one field on this panel that changes without a
-    // tap causing it.
+    // wifiTaskFn (its own FreeRTOS task) updates wifiApUp and nmeaClientCount
+    // independent of any touch -- and unlike the status bar's own AP badge,
+    // this modal isn't on runRenderCycle()'s poll (handleTouch() returns
+    // false for the whole time it's open, same as the dimmer, so loop()
+    // never reaches runRenderCycle() to notice). Poll both by hand: wifiApUp
+    // can flip true moments after the overlay opens if it's opened in the
+    // gap right after boot/enable, before the task has caught up, and
+    // without this the panel would sit showing "AP is off" past the point
+    // it no longer is.
+    static bool lastApUp = false;
     static int lastApClients = -1;
-    int curApClients = wifiEnabled ? nmeaClientCount : 0;
-    if (curApClients != lastApClients) {
+    bool curApUp = wifiApUp;
+    int curApClients = curApUp ? nmeaClientCount : 0;
+    if (curApUp != lastApUp || curApClients != lastApClients) {
+      lastApUp = curApUp;
       lastApClients = curApClients;
       apDirty = true;
     }

@@ -77,7 +77,11 @@ static void drawQrCode(const Rect &box) {
 void drawWifiPanel() {
   auto &d = canvas;
   Rect p = wifiPanelRect();
-  bool apUp = wifiEnabled;
+  // wifiApUp, not wifiEnabled: the latter is the request and goes true
+  // before wifiTaskFn has actually brought the AP up, and WiFi.softAPIP()
+  // reads 0.0.0.0 until it has -- gating on intent rather than confirmed
+  // state showed that zero address as if it were real.
+  bool apUp = wifiApUp;
 
   d.fillRoundRect(p.x, p.y, p.w, p.h, CARD_RADIUS, COLOR_CARD_BG);
   d.drawRoundRect(p.x, p.y, p.w, p.h, CARD_RADIUS, COLOR_ACCENT);

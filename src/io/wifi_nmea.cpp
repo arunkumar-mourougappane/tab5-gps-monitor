@@ -18,6 +18,7 @@ static WiFiClient nmeaClients[4];
 volatile int nmeaClientCount = 0;
 volatile bool wifiEnabled = true;
 volatile bool wifiUserDisabled = false;
+volatile bool wifiApUp = false;
 
 void applyWifiEnabled() {
   wifiEnabled = !asleep && !wifiUserDisabled;
@@ -35,17 +36,15 @@ void enqueueNmea(const char *line) {
 }
 
 static void wifiTaskFn(void *) {
-  bool apUp = false;
-
   for (;;) {
-    if (wifiEnabled && !apUp) {
+    if (wifiEnabled && !wifiApUp) {
       WiFi.mode(WIFI_AP);
       WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS);
       nmeaServer.begin();
-      apUp = true;
+      wifiApUp = true;
       Serial.printf("WiFi AP \'%s\' up -- connect to %s:%u for raw NMEA (TCP)\n", WIFI_AP_SSID,
                     WiFi.softAPIP().toString().c_str(), NMEA_TCP_PORT);
-    } else if (!wifiEnabled && apUp) {
+    } else if (!wifiEnabled && wifiApUp) {
       for (auto &c : nmeaClients) {
         if (c.connected()) c.stop();
       }
@@ -53,11 +52,11 @@ static void wifiTaskFn(void *) {
       WiFi.softAPdisconnect(true); // true also powers the radio down
       WiFi.mode(WIFI_OFF);
       nmeaClientCount = 0;
-      apUp = false;
+      wifiApUp = false;
       Serial.println("WiFi AP down (device asleep)");
     }
 
-    if (apUp) {
+    if (wifiApUp) {
       if (nmeaServer.hasClient()) {
         WiFiClient newClient = nmeaServer.accept();
         bool placed = false;
