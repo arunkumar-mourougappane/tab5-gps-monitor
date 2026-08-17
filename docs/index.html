@@ -362,6 +362,22 @@
     background: var(--topbar); color: var(--t1); font-size: 14px;
   }
   .ovchip.pressed { background: var(--acc); color: var(--bg); }
+  .badge.ap { cursor: pointer; }
+  .badge.ap.pressed { background: var(--acc); color: var(--bg); }
+  .wifi-panel {
+    position: absolute;
+    background: var(--card); border: 1px solid var(--acc); border-radius: 14px;
+  }
+  .wifi-row { position: absolute; font-size: 14px; }
+  .wifi-row .lbl { display: block; }
+  .wifi-row .val { display: block; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .qr-box { position: absolute; background: #fff; border-radius: 6px; }
+  .qr-box i { position: absolute; background: #000; }
+  .qr-off {
+    position: absolute; display: flex; align-items: center; justify-content: center;
+    text-align: center; color: var(--t2); font-size: 14px; border: 1px dashed var(--divider);
+    border-radius: 6px;
+  }
   .tooltip {
     position: absolute; height: 30px; border-radius: 15px;
     display: flex; align-items: center; padding: 0 12px;
@@ -442,6 +458,10 @@
       <h2>Live panel</h2>
       <span class="tag">Simulated receiver &middot; real layout</span>
     </div>
+    <p class="section-note">
+      The AP badge (top right) is tappable &mdash; it opens a proposed QR/join overlay that isn't in the
+      firmware yet. See <a href="#wifi-qr-proposal">Proposed: Wi-Fi join via QR</a> below.
+    </p>
 
     <div class="sim">
       <div>
@@ -483,6 +503,7 @@
             <button type="button" data-st="trip">Trip</button>
             <button type="button" data-st="log">NMEA</button>
             <button type="button" data-st="dim">Brightness</button>
+            <button type="button" data-st="wifi">Wi-Fi QR (proposed)</button>
           </div>
         </div>
 
@@ -642,6 +663,43 @@
     </div>
   </section>
 
+  <!-- ================================================================ -->
+  <section id="wifi-qr-proposal">
+    <div class="rule-head">
+      <h2>Proposed: Wi-Fi join via QR</h2>
+      <span class="tag">Not yet in firmware</span>
+    </div>
+    <p class="section-note">
+      The AP badge is currently a read-only status pill (client count, or nothing once the digit's the
+      story). The proposal: make it a button. Tapping it opens a modal &mdash; same shape as the
+      brightness overlay above it and to its left &mdash; showing the AP's SSID, password and address as
+      text, a QR code encoding a Wi-Fi join payload
+      (<code>WIFI:T:WPA;S:&lt;ssid&gt;;P:&lt;password&gt;;;</code>) a phone camera can scan directly, and a
+      chip to turn the radio off without going through sleep. Try it above: tap the AP pill, or use
+      <b>Jump to state &rarr; Wi-Fi QR</b> in the panel on the right.
+    </p>
+    <p class="section-note">
+      Full writeup &mdash; QR library choice for the firmware side, the hit-rect design tension the AP
+      badge's chained/resizing layout creates, the manual-toggle-vs-sleep interaction, and open questions
+      to settle before implementing &mdash; is in
+      <a href="wifi-ap-qr-join.md">docs/wifi-ap-qr-join.md</a>.
+    </p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Shown as</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>SSID</td><td class="mono">Tab5-GPS</td></tr>
+          <tr><td>Password</td><td class="mono">gpstest123</td></tr>
+          <tr><td>Address</td><td class="mono">192.168.4.1:10110</td></tr>
+          <tr><td>Connected</td><td class="mono">nmeaClientCount, live</td></tr>
+          <tr><td>Toggle chip</td><td>DISABLE AP / ENABLE AP, independent of sleep</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <footer class="wrap">
     <p>
       Reproduced from <code>src/main.cpp</code> — layout constants, palette, SNR sort order, hit radii
@@ -709,6 +767,51 @@
     off: { x: 390, y: 403, w: 150, h: 44 },
     done: { x: 720, y: 403, w: 150, h: 44 },
   };
+
+  // Proposed, not yet implemented in firmware -- see docs/wifi-ap-qr-join.md.
+  // Geometry mirrors DIM's pattern: a centred panel, a fixed two-chip row
+  // along the bottom.
+  const WIFI = {
+    panel: { x: 300, y: 130, w: 680, h: 460 },
+    qr: { x: 330, y: 190, w: 260, h: 260 },
+    toggle: { x: 330, y: 528, w: 190, h: 44 },
+    done: { x: 800, y: 528, w: 150, h: 44 },
+  };
+  // Version-3 QR (29x29 modules), error correction M, encoding the AP join
+  // string below. Precomputed offline (Python + segno) rather than encoded
+  // at runtime -- this page has no QR library, and the content is fixed.
+  const WIFI_QR_JOIN_STRING = "WIFI:T:WPA;S:Tab5-GPS;P:gpstest123;;";
+  const WIFI_QR_BITS = [
+    "11111110011010101000001111111",
+    "10000010011100010100101000001",
+    "10111010000100011111001011101",
+    "10111010001001001000101011101",
+    "10111010011000110100101011101",
+    "10000010110000011101001000001",
+    "11111110101010101010101111111",
+    "00000000001001001101000000000",
+    "10010110110010110000110100000",
+    "11000000001011000101101101110",
+    "10110110010001101101101100110",
+    "01010000110001000011111001111",
+    "01011111111100100100011111011",
+    "11010001011011101110101000111",
+    "00010111101101101110111000111",
+    "01101000101000000100110110000",
+    "00001111100111001101110100101",
+    "00101001010011100011011000110",
+    "10110110110000100110001110111",
+    "00101001101000111110101100000",
+    "10011010001000000001111111111",
+    "00000000100000100111100011100",
+    "11111110010100000000101011010",
+    "10000010100010111001100010110",
+    "10111010001110000100111111111",
+    "10111010111001000101001101010",
+    "10111010001101000101000011101",
+    "10000010011010000110110100010",
+    "11111110101010001101101010110",
+  ];
 
   /* =====================================================================
      Simulated receiver
@@ -946,8 +1049,11 @@
     brightness: 158,     // 8..255
     backlightOff: false,
     asleep: false,
-    press: null,         // LIGHT | SLEEP | FILTER | DIM_OFF | DIM_DONE
+    press: null,         // LIGHT | SLEEP | FILTER | DIM_OFF | DIM_DONE | AP | AP_TOGGLE | AP_DONE
     skyDots: [],
+    // Proposed, not yet implemented in firmware -- see docs/wifi-ap-qr-join.md.
+    apOpen: false,     // QR/join overlay open
+    wifiOn: true,      // manual radio toggle, independent of sleep's own AP teardown
   };
   const BRIGHTNESS_MIN = 8, BRIGHTNESS_MAX = 255;
 
@@ -991,11 +1097,16 @@
     const live = SIM.t - SIM.lastSentenceMs < 5000 && SIM.lastSentenceMs > 0;
     const batt = SIM.battery;
     const battColor = batt < 20 ? C.bad : batt < 40 ? C.warn : C.good;
-    const ap = UI.asleep ? 0 : SIM.apClients;
+    // apUp mirrors wifiEnabled in the firmware (currently sleep-driven only);
+    // wifiOn is the proposed manual toggle layered on top of it.
+    const apUp = UI.wifiOn && !UI.asleep;
+    const apClients = apUp ? SIM.apClients : 0;
+    const apLabel = apUp ? `AP ${apClients}` : "AP OFF";
+    const apDot = !apUp ? C.none : apClients > 0 ? C.good : C.t2;
 
     const badges = [
       `<div class="badge"><span class="dot" style="background:${SIM.sdReady ? C.good : C.none}"></span>${SIM.sdReady ? "SD" : "NO SD"}</div>`,
-      `<div class="badge"><span class="dot" style="background:${ap > 0 ? C.good : C.t2}"></span>AP ${ap}</div>`,
+      `<div class="badge ap${UI.press === "AP" ? " pressed" : ""}" id="badge-ap"><span class="dot" style="background:${apDot}"></span>${apLabel}</div>`,
       `<div class="badge"><div class="batt"><i style="width:${batt}%;background:${battColor}"></i></div>${batt}%</div>`,
       `<div class="badge"><span class="dot" style="background:${live ? C.good : C.bad}"></span>${live ? "RECEIVING" : "NO DATA"}</div>`,
     ].join("");
@@ -1267,9 +1378,72 @@
     document.getElementById("l-log").innerHTML = h;
   }
 
+  // Renders the precomputed WIFI_QR_BITS matrix as a grid of 1-bit divs
+  // inside a white quiet-zone box -- see the WIFI_QR_BITS comment above.
+  function qrModulesHTML(box) {
+    const modules = WIFI_QR_BITS.length;         // 29
+    const quietModules = 4;                      // spec minimum is 4
+    const m = box.w / (modules + quietModules * 2);
+    // Local to the box, not device-absolute -- these <i> elements are
+    // children of the already-positioned .qr-box, so their own left/top
+    // are relative to its origin, not the screen's.
+    const x0 = quietModules * m, y0 = quietModules * m;
+    let h = "";
+    for (let ry = 0; ry < modules; ry++) {
+      const row = WIFI_QR_BITS[ry];
+      for (let cx = 0; cx < modules; cx++) {
+        if (row[cx] === "1") {
+          h += `<i style="left:${(x0 + cx * m).toFixed(1)}px;top:${(y0 + ry * m).toFixed(1)}px;` +
+               `width:${m.toFixed(1)}px;height:${m.toFixed(1)}px"></i>`;
+        }
+      }
+    }
+    return h;
+  }
+
+  // Proposed, not yet implemented in firmware -- see docs/wifi-ap-qr-join.md.
+  // Panel geometry and content for the AP badge's QR/join overlay.
+  function drawWifiOverlay() {
+    const p = WIFI.panel;
+    const apUp = UI.wifiOn && !UI.asleep;
+    const rows = [
+      ["SSID", apUp ? "Tab5-GPS" : "—"],
+      ["PASSWORD", apUp ? "gpstest123" : "—"],
+      ["ADDRESS", apUp ? "192.168.4.1:10110" : "—"],
+      ["CONNECTED", apUp ? `${SIM.apClients} client${SIM.apClients === 1 ? "" : "s"}` : "0 clients"],
+    ];
+    const colX = WIFI.qr.x + WIFI.qr.w + 30;
+    let rowsHtml = "";
+    rows.forEach((r, i) => {
+      const y = WIFI.qr.y + 4 + i * 66;
+      rowsHtml += el("abs wifi-row", at(colX, y, `width:${p.x + p.w - 30 - colX}px`),
+        `<span class="lbl t2">${r[0]}</span><span class="val">${r[1]}</span>`);
+    });
+
+    const qrHtml = apUp
+      ? el("abs qr-box", at(WIFI.qr.x, WIFI.qr.y, `width:${WIFI.qr.w}px;height:${WIFI.qr.h}px`),
+          qrModulesHTML(WIFI.qr))
+      : el("abs qr-off", at(WIFI.qr.x, WIFI.qr.y, `width:${WIFI.qr.w}px;height:${WIFI.qr.h}px`),
+          "AP is off &mdash;<br>enable it to let a phone join");
+
+    document.getElementById("l-overlay").innerHTML +=
+      el("abs wifi-panel", at(p.x, p.y, `width:${p.w}px;height:${p.h}px`)) +
+      el("abs lbl", at(p.x + 30, p.y + 22), "WI-FI ACCESS POINT") +
+      qrHtml +
+      rowsHtml +
+      el("abs wifi-row t2", at(WIFI.qr.x, WIFI.qr.y + WIFI.qr.h + 20, `width:${p.w - 60}px`),
+        "Scanning joins the Wi-Fi network only &ndash;<br>the NMEA stream still needs its own TCP client.") +
+      el(`abs ovchip${UI.press === "AP_TOGGLE" ? " pressed" : ""}`,
+        at(WIFI.toggle.x, WIFI.toggle.y, `width:${WIFI.toggle.w}px`), apUp ? "DISABLE AP" : "ENABLE AP") +
+      el(`abs ovchip${UI.press === "AP_DONE" ? " pressed" : ""}`,
+        at(WIFI.done.x, WIFI.done.y, `width:${WIFI.done.w}px`), "DONE");
+  }
+
   function drawOverlay() {
     const box = document.getElementById("l-overlay");
-    if (!UI.dimmerOpen) { box.innerHTML = ""; return; }
+    box.innerHTML = "";
+    if (UI.apOpen) { drawWifiOverlay(); return; }
+    if (!UI.dimmerOpen) return;
     const pct = Math.round(((UI.brightness - BRIGHTNESS_MIN) * 100) / (BRIGHTNESS_MAX - BRIGHTNESS_MIN));
     const fill = Math.max(DIM.track.h, Math.round((DIM.track.w * pct) / 100));
     const knobX = clamp(DIM.track.x + fill, DIM.track.x + 13, DIM.track.x + DIM.track.w - 13);
@@ -1291,7 +1465,8 @@
   let relayoutPending = true;
 
   const sigStatus = () => [
-    SIM.t - SIM.lastSentenceMs < 5000, SIM.battery, UI.asleep ? 0 : SIM.apClients,
+    SIM.t - SIM.lastSentenceMs < 5000, SIM.battery,
+    UI.wifiOn && !UI.asleep ? SIM.apClients : -1,
     SIM.sdReady, UI.press,
   ].join("|");
 
@@ -1356,6 +1531,7 @@
       UI.asleep ? "asleep — tap the panel to wake"
       : UI.backlightOff ? "backlight off — tap the panel to wake"
       : UI.dimmerOpen ? "brightness overlay"
+      : UI.apOpen ? "wifi ap overlay (proposed)"
       : UI.logExpanded ? "NMEA expanded"
       : UI.view === "trip" ? "trip stats" : "live position";
   }
@@ -1391,15 +1567,42 @@
     return { x: c.x - 16, y: c.y - 5, w: c.w + 24, h: c.h + 18 };
   };
 
+  // Proposed, not yet implemented in firmware -- see docs/wifi-ap-qr-join.md.
+  // Unlike LIGHT/SLEEP (fixed x/y, like the firmware's own lightBtnRect()),
+  // the AP badge is the rightmost pill in a row that chains leftward and
+  // resizes with its neighbours' labels (battery %, SD/NO SD) -- there's no
+  // static rect to hit-test. Reading the live DOM box and converting it back
+  // into device space sidesteps hardcoding that chain; the firmware
+  // equivalent would be caching the rect drawStatusPill() already computes
+  // when it places the pill, the same way lightBtnRect() is a constant.
+  function apBadgeHit() {
+    const badge = document.getElementById("badge-ap");
+    if (!badge) return null;
+    const box = stage.getBoundingClientRect();
+    const s = box.width / W;
+    const r = badge.getBoundingClientRect();
+    return {
+      x: (r.left - box.left) / s - 6, y: (r.top - box.top) / s - 4,
+      w: r.width / s + 12, h: r.height / s + 8,
+    };
+  }
+
   function hitChips(x, y) {
     if (UI.dimmerOpen) {
       if (hit(x, y, DIM.off)) return "DIM_OFF";
       if (hit(x, y, DIM.done)) return "DIM_DONE";
       return null;
     }
+    if (UI.apOpen) {
+      if (hit(x, y, WIFI.toggle)) return "AP_TOGGLE";
+      if (hit(x, y, WIFI.done)) return "AP_DONE";
+      return null;
+    }
     if (hit(x, y, lightHit())) return "LIGHT";
     if (hit(x, y, sleepHit())) return "SLEEP";
     if (hit(x, y, filterHit())) return "FILTER";
+    const apRect = apBadgeHit();
+    if (apRect && hit(x, y, apRect)) return "AP";
     return null;
   }
 
@@ -1437,6 +1640,7 @@
   function goDark(sleep) {
     if (sleep) UI.asleep = true; else UI.backlightOff = true;
     UI.dimmerOpen = false;
+    UI.apOpen = false;
     UI.press = null;
     darkLayer.hidden = false;
     applyBrightness();
@@ -1497,11 +1701,20 @@
       return;
     }
 
+    // Proposed, not yet implemented in firmware -- see docs/wifi-ap-qr-join.md.
+    if (UI.apOpen) {
+      if (chip === "AP_TOGGLE") { UI.wifiOn = !UI.wifiOn; renderTick(false); return; }
+      if (chip === "AP_DONE" || !hit(x, y, WIFI.panel)) { UI.apOpen = false; relayout(); return; }
+      renderTick(false);
+      return;
+    }
+
     const inSky = !UI.logExpanded && hit(x, y, RECT.sky);
     const dot = inSky ? hitSkyDot(x, y) : null;
 
     if (chip === "LIGHT") { UI.dimmerOpen = true; renderTick(false); }
     else if (chip === "SLEEP") { goDark(true); }
+    else if (chip === "AP") { UI.apOpen = true; renderTick(false); }
     else if (dot) { UI.tooltip = { sat: dot.sat, at: SIM.t }; renderTick(true); }
     else if (inSky) { if (UI.tooltip) { UI.tooltip = null; renderTick(true); } }
     else if (!UI.logExpanded && hit(x, y, RECT.fix)) {
@@ -1549,6 +1762,7 @@
     if (UI.asleep || UI.backlightOff) wake();
     const to = btn.dataset.st;
     UI.dimmerOpen = to === "dim";
+    UI.apOpen = to === "wifi";
     UI.logExpanded = to === "log";
     UI.view = to === "trip" ? "trip" : "live";
     relayout();
