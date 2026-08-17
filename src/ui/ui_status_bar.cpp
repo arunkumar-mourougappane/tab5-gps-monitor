@@ -4,11 +4,7 @@
 #include "ui/ui_widgets.h"
 #include "io/sd_logger.h"
 #include "io/wifi_nmea.h"
-
-// PressTarget is still defined in main.cpp; forward-declared here since only
-// its LIGHT/SLEEP/FILTER members are read (for the pressed-state colour swap).
-enum class PressTarget : uint8_t { NONE, LIGHT, SLEEP, FILTER, DIM_OFF, DIM_DONE };
-extern PressTarget pressTarget;
+#include "input/touch_input.h"
 
 Rect lightBtnRect() {
   return {TOPBAR_CTRL_X, (TOPBAR_H - BADGE_H) / 2, TOPBAR_CTRL_W, BADGE_H};

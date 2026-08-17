@@ -6,7 +6,7 @@
 
 // Which chip the finger is currently down on, so it can render pressed. Held
 // across frames (not just on release) so the highlight tracks the finger.
-enum class PressTarget : uint8_t { NONE, LIGHT, SLEEP, FILTER, DIM_OFF, DIM_DONE };
+enum class PressTarget : uint8_t { NONE, LIGHT, SLEEP, FILTER, DIM_OFF, DIM_DONE, AP, AP_TOGGLE, AP_DONE };
 extern PressTarget pressTarget;
 
 extern bool touchPressing;

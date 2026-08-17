@@ -3,10 +3,7 @@
 #include "core/theme.h"
 #include "ui/ui_widgets.h"
 #include "power/power.h"
-
-// PressTarget is still defined in main.cpp.
-enum class PressTarget : uint8_t { NONE, LIGHT, SLEEP, FILTER, DIM_OFF, DIM_DONE };
-extern PressTarget pressTarget;
+#include "input/touch_input.h"
 
 bool dimmerOpen = false;
 bool dimmerDirty = false;

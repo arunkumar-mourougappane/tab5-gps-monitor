@@ -3,10 +3,7 @@
 #include "core/theme.h"
 #include "ui/ui_widgets.h"
 #include "model/nmea_parser.h"
-
-// PressTarget is still defined in main.cpp.
-enum class PressTarget : uint8_t { NONE, LIGHT, SLEEP, FILTER, DIM_OFF, DIM_DONE };
-extern PressTarget pressTarget;
+#include "input/touch_input.h"
 
 // Fixed size so the hit target matches the drawn chip regardless of label, and
 // so the chip can't resize under a changing label the way the status badges did.
